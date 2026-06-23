@@ -291,9 +291,12 @@ def open_sdr(center_mhz: float, gain, ppm: int, device_spec) -> tuple:
         sdr    = RtlSdr(device_index=idx)
         serial = resolve_device_serial(idx)
 
-    sdr.sample_rate     = SAMPLE_RATE_HZ
-    sdr.center_freq     = int(center_mhz * 1e6)
-    sdr.freq_correction = ppm
+    sdr.sample_rate = SAMPLE_RATE_HZ
+    sdr.center_freq = int(center_mhz * 1e6)
+    # librtlsdr on Windows raises LIBUSB_ERROR_INVALID_PARAM when ppm=0;
+    # skip the call entirely since the device resets to 0 on open anyway.
+    if ppm != 0:
+        sdr.freq_correction = ppm
 
     if gain == "auto":
         sdr.gain = "auto"
