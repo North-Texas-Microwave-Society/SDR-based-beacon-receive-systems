@@ -1,0 +1,20 @@
+[Unit]
+Description=NTMS 10 GHz Beacon Monitor (NESDR Smart)
+After=network.target
+Documentation=https://github.com/North-Texas-Microwave-Society/SDR-based-beacon-receive-systems
+
+[Service]
+Type=simple
+User=ntms-beacon
+Group=ntms-beacon
+WorkingDirectory=/var/lib/ntms-beacon
+EnvironmentFile=/opt/ntms-beacon/station.conf
+ExecStart=/opt/ntms-beacon/venv/bin/python3 /opt/ntms-beacon/beacon_monitor_nesdr.py
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=beacon-monitor
+
+[Install]
+WantedBy=multi-user.target

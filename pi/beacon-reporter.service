@@ -1,0 +1,21 @@
+[Unit]
+Description=NTMS Beacon Reporter
+After=network.target beacon-monitor.service
+Wants=beacon-monitor.service
+Documentation=https://github.com/North-Texas-Microwave-Society/SDR-based-beacon-receive-systems
+
+[Service]
+Type=simple
+User=ntms-beacon
+Group=ntms-beacon
+WorkingDirectory=/var/lib/ntms-beacon
+EnvironmentFile=/opt/ntms-beacon/station.conf
+ExecStart=/opt/ntms-beacon/venv/bin/python3 /opt/ntms-beacon/beacon_reporter.py --state /var/lib/ntms-beacon/beacon_reporter_state.json
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=beacon-reporter
+
+[Install]
+WantedBy=multi-user.target

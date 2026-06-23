@@ -161,6 +161,91 @@ python beacon_monitor_nesdr.py --output beacon_log.csv
 python beacon_reporter.py --site YOUR-CALLSIGN-10G-CITY
 ```
 
+---
+
+## Raspberry Pi Deployment
+
+The `pi/` directory contains a one-command installer that configures a headless Pi as a fully automatic monitoring station.
+
+### Recommended hardware per station
+
+| Item | Notes | ~Cost |
+|------|-------|-------|
+| Raspberry Pi 4 Model B, 2 GB | 4 USB-A ports, WiFi + Ethernet | $35–45 |
+| MicroSD card, 32 GB, Class 10 | SanDisk or Samsung recommended | $10 |
+| USB-C power supply, 5V 3A | Official Pi supply preferred | $12 |
+| Case | Passive cooling is fine for this workload | $8–12 |
+
+Flash **Raspberry Pi OS Lite (64-bit)** using Raspberry Pi Imager. In the Imager advanced settings, pre-configure your WiFi credentials and enable SSH — the Pi will be network-accessible on first boot with no keyboard or monitor required.
+
+### One-time install
+
+Clone the repo on the Pi, then run the installer as root:
+
+```bash
+git clone https://github.com/North-Texas-Microwave-Society/SDR-based-beacon-receive-systems.git
+cd SDR-based-beacon-receive-systems
+sudo bash pi/install.sh
+```
+
+The installer will:
+
+1. Install `librtlsdr`, `rtl-sdr`, and `python3-venv` from apt
+2. Blacklist the DVB kernel module so the NESDR Smart is available to librtlsdr
+3. Create a `ntms-beacon` system user with USB device access
+4. Create `/opt/ntms-beacon/` (scripts + venv) and `/var/lib/ntms-beacon/` (CSV + state)
+5. Install `pyrtlsdr` and `numpy` in an isolated virtualenv
+6. Prompt for site-specific values and write `/opt/ntms-beacon/station.conf`
+7. Install and enable `beacon-monitor` and `beacon-reporter` as systemd services
+8. Start both services and print a status summary
+
+> **Note:** The DVB module blacklist takes effect after a reboot. If the monitor fails to open the device on the first run, reboot the Pi.
+
+### What runs automatically
+
+Both services start on boot and restart automatically if they crash:
+
+```
+beacon-monitor.service  →  beacon_monitor_nesdr.py  (sweeps every 10 s, writes CSV)
+beacon-reporter.service →  beacon_reporter.py        (tails CSV, POSTs to NTMS API)
+```
+
+### Useful commands on the Pi
+
+```bash
+# Live log from both services
+sudo journalctl -u beacon-monitor -u beacon-reporter -f
+
+# Check service status
+sudo systemctl status beacon-monitor beacon-reporter
+
+# Restart after changing station.conf
+sudo systemctl restart beacon-monitor beacon-reporter
+
+# List connected SDR devices
+/opt/ntms-beacon/venv/bin/python3 /opt/ntms-beacon/beacon_monitor_nesdr.py --list-devices
+```
+
+### Reconfiguring a station
+
+Edit `/opt/ntms-beacon/station.conf` directly, then restart:
+
+```bash
+sudo nano /opt/ntms-beacon/station.conf
+sudo systemctl restart beacon-monitor beacon-reporter
+```
+
+Or re-run the installer — it detects the existing config and asks before overwriting it.
+
+### Pi-specific notes vs Windows
+
+| Topic | Windows | Raspberry Pi |
+|-------|---------|--------------|
+| Driver install | Zadig (WinUSB replacement) | Not needed — librtlsdr is a native apt package |
+| DVB module conflict | Not applicable | Must blacklist `dvb_usb_rtl28xxu` (installer does this) |
+| `ppm=0` bug | Yes — triggers LIBUSB_ERROR_INVALID_PARAM | Not present on Linux |
+| Autostart | Task Scheduler (manual) | systemd (handled by installer) |
+
 ## License
 
 MIT License — see LICENSE file for details.

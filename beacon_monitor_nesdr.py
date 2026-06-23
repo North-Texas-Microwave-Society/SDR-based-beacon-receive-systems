@@ -449,6 +449,11 @@ def run_monitor(args) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
+def _env(name, default):
+    """Return env var value as a string, or str(default) if unset."""
+    return os.environ.get(name, str(default))
+
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="NTMS 10 GHz Beacon Monitor — NooElec NESDR Smart",
@@ -456,27 +461,41 @@ def parse_args():
     )
     p.add_argument("--list-devices", action="store_true",
                    help="List connected RTL-SDR devices and exit")
-    p.add_argument("--device",     default=DEFAULT_DEVICE,
+    # Each argument falls back to a BEACON_* env var, then the coded default.
+    # This lets systemd's EnvironmentFile= drive the script without shell
+    # variable expansion in ExecStart= (which systemd does not support for
+    # variables loaded via EnvironmentFile).
+    p.add_argument("--device",
+                   default=_env("BEACON_DEVICE", DEFAULT_DEVICE),
                    help="Device index (int) or serial number string")
-    p.add_argument("--freq",       type=float, default=DEFAULT_CENTER_MHZ,
+    p.add_argument("--freq",      type=float,
+                   default=float(_env("BEACON_FREQ_MHZ",      DEFAULT_CENTER_MHZ)),
                    help="IF center frequency in MHz")
-    p.add_argument("--lo",         type=float, default=DEFAULT_LO_MHZ,
+    p.add_argument("--lo",        type=float,
+                   default=float(_env("BEACON_LO_MHZ",        DEFAULT_LO_MHZ)),
                    help="LNB LO frequency in MHz")
-    p.add_argument("--interval",   type=float, default=DEFAULT_INTERVAL_S,
+    p.add_argument("--interval",  type=float,
+                   default=float(_env("BEACON_INTERVAL_S",    DEFAULT_INTERVAL_S)),
                    help="Sweep interval in seconds")
-    p.add_argument("--threshold",  type=float, default=DEFAULT_THRESHOLD_DB,
+    p.add_argument("--threshold", type=float,
+                   default=float(_env("BEACON_THRESHOLD_DBFS", DEFAULT_THRESHOLD_DB)),
                    help="Detection threshold in dBFS")
-    p.add_argument("--gain",       type=str,   default=DEFAULT_GAIN,
+    p.add_argument("--gain",      type=str,
+                   default=_env("BEACON_GAIN",                DEFAULT_GAIN),
                    help="Gain in dB (R820T2/R828D steps) or 'auto'")
-    p.add_argument("--fft",        type=int,   default=DEFAULT_FFT_SIZE,
+    p.add_argument("--fft",       type=int,
+                   default=int(_env("BEACON_FFT_SIZE",        DEFAULT_FFT_SIZE)),
                    help="FFT size (power of 2)")
-    p.add_argument("--output",     type=str,   default=DEFAULT_OUTPUT,
+    p.add_argument("--output",    type=str,
+                   default=_env("BEACON_OUTPUT",              DEFAULT_OUTPUT),
                    help="Output CSV file path")
-    p.add_argument("--duration",   type=float, default=0,
+    p.add_argument("--duration",  type=float, default=0,
                    help="Run for this many seconds then exit (0 = forever)")
-    p.add_argument("--ppm",        type=int,   default=DEFAULT_PPM,
+    p.add_argument("--ppm",       type=int,
+                   default=int(_env("BEACON_PPM",             DEFAULT_PPM)),
                    help="PPM frequency correction (0 for NESDR Smart XTR/v5 TCXO)")
-    p.add_argument("--cw-end",     type=int,   default=DEFAULT_CW_END_S,
+    p.add_argument("--cw-end",    type=int,
+                   default=int(_env("BEACON_CW_END_S",        DEFAULT_CW_END_S)),
                    dest="cw_end",
                    help="Seconds into odd minute where CW ends and carrier begins")
     return p.parse_args()
