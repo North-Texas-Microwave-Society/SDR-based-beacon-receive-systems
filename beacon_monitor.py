@@ -89,6 +89,7 @@ DEFAULT_OUTPUT        = "beacon_log.csv"
 DEFAULT_CW_END_S      = 10        # seconds into odd minute where CW ends
 DEFAULT_MAX_SIGNALS   = 1
 DEFAULT_LOCATION      = "UNKNOWN"
+DEFAULT_SPAN_KHZ      = 2000       # analysis span in kHz (default = full 2 MHz capture)
 SAMPLE_RATE_HZ        = 2_048_000  # 2.048 MSPS -- fits +/-1 MHz easily
 SUPPRESS_HZ           = 5_000      # peak suppression window (+/-5 kHz)
 CSV_FIELDS            = [
@@ -279,6 +280,7 @@ def run_monitor(args) -> None:
     cw_end_s    = args.cw_end
     max_signals = args.max_signals
     location    = args.location
+    span_hz     = args.span_khz * 1000
 
     n_samples = samples_needed(interval_s, fft_size)
 
@@ -288,6 +290,7 @@ def run_monitor(args) -> None:
     print(f"  RF (approx)   : {args.freq + lo_mhz:.3f} MHz")
     print(f"  Sample rate   : {SAMPLE_RATE_HZ/1e6:.3f} MSPS")
     print(f"  FFT size      : {fft_size} bins  ({SAMPLE_RATE_HZ/fft_size:.0f} Hz/bin)")
+    print(f"  Analysis span : +/-{span_hz/2/1e3:.0f} kHz  ({span_hz/1e3:.0f} kHz total)")
     print(f"  Sweep interval: {interval_s} s")
     print(f"  Threshold     : {threshold:.1f} dBFS")
     print(f"  Max signals   : {max_signals}")
@@ -342,8 +345,9 @@ def run_monitor(args) -> None:
             # --- Compute spectrum ---
             freqs_offset, power_db = compute_power_spectrum(samples, fft_size)
 
-            # --- Find up to max_signals peaks ---
-            peaks = find_peaks(freqs_offset, power_db, center_hz, max_signals)
+            # --- Find up to max_signals peaks within analysis span ---
+            peaks = find_peaks(freqs_offset, power_db, center_hz, max_signals,
+                               span_hz=span_hz)
 
             elapsed   = time.monotonic() - sweep_start
             csv_rows  = []
@@ -427,6 +431,10 @@ def parse_args():
                    help=f"Max signals to detect per sweep, 1-5 (default: {DEFAULT_MAX_SIGNALS})")
     p.add_argument("--location",    type=str,   default=DEFAULT_LOCATION,
                    help=f"Site identifier for CSV tagging (default: {DEFAULT_LOCATION})")
+    p.add_argument("--span",        type=float, default=DEFAULT_SPAN_KHZ,
+                   dest="span_khz",
+                   help=f"Analysis span in kHz centered on --freq (default: {DEFAULT_SPAN_KHZ} kHz = full capture). "
+                        f"Example: --span 100 limits peak search to +/-50 kHz.")
     return p.parse_args()
 
 
