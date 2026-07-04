@@ -39,8 +39,10 @@ Location tagging:
 Output:
   - CSV log: one row per detected signal per sweep (long format)
   - Columns: timestamp_utc, location, beacon_phase, signal_rank,
-             peak_freq_hz, peak_power_dbfs, freq_drift_hz,
+             peak_freq_hz, peak_power_dbfs, freq_drift_hz, freq_sep_hz,
              above_threshold, center_freq_hz, lo_freq_mhz, rf_freq_hz
+  - freq_sep_hz: frequency difference rank1 minus rank2 (Hz), rank-1 row only,
+                 populated only when --max-signals 2 and both peaks detected.
 
 Usage:
   python beacon_monitor.py [options]
@@ -94,7 +96,7 @@ SAMPLE_RATE_HZ        = 2_048_000  # 2.048 MSPS -- fits +/-1 MHz easily
 SUPPRESS_HZ           = 5_000      # peak suppression window (+/-5 kHz)
 CSV_FIELDS            = [
     "timestamp_utc", "location", "beacon_phase", "signal_rank",
-    "peak_freq_hz", "peak_power_dbfs", "freq_drift_hz",
+    "peak_freq_hz", "peak_power_dbfs", "freq_drift_hz", "freq_sep_hz",
     "above_threshold", "center_freq_hz", "lo_freq_mhz", "rf_freq_hz"
 ]
 # ---------------------------------------------------------------------------
@@ -352,6 +354,11 @@ def run_monitor(args) -> None:
             elapsed   = time.monotonic() - sweep_start
             csv_rows  = []
 
+            # Frequency separation between rank-1 and rank-2 (only when max_signals==2)
+            freq_sep_hz = None
+            if max_signals == 2 and len(peaks) == 2:
+                freq_sep_hz = int(round(peaks[0][0] - peaks[1][0]))
+
             for rank, (peak_freq_hz, peak_power) in enumerate(peaks, start=1):
                 above = 1 if peak_power >= threshold else 0
 
@@ -375,16 +382,19 @@ def run_monitor(args) -> None:
                     "peak_freq_hz"    : f"{peak_freq_hz:.0f}",
                     "peak_power_dbfs" : f"{peak_power:.2f}",
                     "freq_drift_hz"   : drift_hz if drift_hz is not None else "",
+                    "freq_sep_hz"     : freq_sep_hz if rank == 1 else "",
                     "above_threshold" : above,
                     "center_freq_hz"  : f"{center_hz:.0f}",
                     "lo_freq_mhz"     : f"{lo_mhz:.3f}",
                     "rf_freq_hz"      : f"{rf_freq_hz:.0f}"
                 })
 
+                sep_str = (f"  sep={freq_sep_hz/1e3:+.0f}kHz"
+                           if rank == 1 and freq_sep_hz is not None else "")
                 print(f"  {utc_now:<26} {phase_lbl:<8} {rank}  "
                       f"{peak_freq_hz/1e6:<16.4f} {peak_power:>+8.1f}  "
                       f"{drift_str:>8}  {status}"
-                      + (f"  ({elapsed*1000:.0f}ms)" if rank == 1 else ""))
+                      + (f"  ({elapsed*1000:.0f}ms){sep_str}" if rank == 1 else ""))
 
             append_rows(output_path, csv_rows)
             row_count   += len(csv_rows)
