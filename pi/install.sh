@@ -39,8 +39,8 @@ askpass() { local prompt="$1" reply
 # ---------------------------------------------------------------------------
 [[ $EUID -eq 0 ]] || die "Run with sudo: sudo bash pi/install.sh"
 
-if [[ ! -f "${REPO_ROOT}/beacon_monitor_nesdr.py" ]]; then
-    die "beacon_monitor_nesdr.py not found in ${REPO_ROOT}. Run from the repo root."
+if [[ ! -f "${REPO_ROOT}/beacon_monitor.py" ]]; then
+    die "beacon_monitor.py not found in ${REPO_ROOT}. Run from the repo root."
 fi
 
 echo
@@ -109,8 +109,9 @@ info "Created ${INSTALL_DIR} and ${DATA_DIR}."
 # ---------------------------------------------------------------------------
 echo
 echo "--- Copying scripts ---"
-cp "${REPO_ROOT}/beacon_monitor_nesdr.py" "${INSTALL_DIR}/"
-cp "${REPO_ROOT}/beacon_reporter.py"      "${INSTALL_DIR}/"
+cp "${REPO_ROOT}/beacon_monitor.py"    "${INSTALL_DIR}/"
+cp "${REPO_ROOT}/beacon_calibrate.py" "${INSTALL_DIR}/"
+cp "${REPO_ROOT}/beacon_reporter.py"  "${INSTALL_DIR}/"
 chown root:root "${INSTALL_DIR}"/beacon_*.py
 chmod 644       "${INSTALL_DIR}"/beacon_*.py
 info "Scripts copied to ${INSTALL_DIR}."
@@ -239,7 +240,8 @@ echo "  Useful commands:"
 echo "    View live logs  : sudo journalctl -u beacon-monitor -u beacon-reporter -f"
 echo "    Stop services   : sudo systemctl stop beacon-monitor beacon-reporter"
 echo "    Restart services: sudo systemctl restart beacon-monitor beacon-reporter"
-echo "    List SDR devices: ${VENV}/bin/python3 ${INSTALL_DIR}/beacon_monitor_nesdr.py --list-devices"
+echo "    List SDR devices: ${VENV}/bin/python3 ${INSTALL_DIR}/beacon_monitor.py --list-devices"
+echo "    Run calibration : ${VENV}/bin/python3 ${INSTALL_DIR}/beacon_calibrate.py"
 echo
 if [[ ! -f "$BLACKLIST" ]] || systemctl is-active beacon-monitor.service &>/dev/null; then
     warn "NOTE: The DVB kernel module blacklist takes effect after a reboot."

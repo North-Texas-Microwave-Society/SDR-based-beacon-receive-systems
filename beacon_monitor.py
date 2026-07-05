@@ -92,6 +92,8 @@ DEFAULT_CW_END_S      = 10        # seconds into odd minute where CW ends
 DEFAULT_MAX_SIGNALS   = 1
 DEFAULT_LOCATION      = "UNKNOWN"
 DEFAULT_SPAN_KHZ      = 2000       # analysis span in kHz (default = full 2 MHz capture)
+DEFAULT_PPM           = 1
+DEFAULT_DEVICE        = 0
 SAMPLE_RATE_HZ        = 2_048_000  # 2.048 MSPS -- fits +/-1 MHz easily
 SUPPRESS_HZ           = 5_000      # peak suppression window (+/-5 kHz)
 CSV_FIELDS            = [
@@ -100,6 +102,51 @@ CSV_FIELDS            = [
     "above_threshold", "center_freq_hz", "lo_freq_mhz", "rf_freq_hz"
 ]
 # ---------------------------------------------------------------------------
+
+
+def _env(name, default):
+    """Return env var as string, or str(default) if unset. Lets systemd EnvironmentFile drive the script."""
+    return os.environ.get(name, str(default))
+
+
+def get_device_list() -> list:
+    devices = []
+    try:
+        serials = RtlSdr.get_device_serial_addresses()
+        for idx, serial in enumerate(serials):
+            devices.append({"index": idx, "serial": serial})
+    except Exception:
+        try:
+            count = RtlSdr.get_device_count()
+            for idx in range(count):
+                devices.append({"index": idx, "serial": "unknown"})
+        except Exception:
+            pass
+    return devices
+
+
+def print_device_list() -> None:
+    devices = get_device_list()
+    if not devices:
+        print("No RTL-SDR devices found.")
+        return
+    print(f"Found {len(devices)} RTL-SDR device(s):")
+    print(f"  {'Index':<8} Serial")
+    print(f"  {'------':<8} ----------------")
+    for d in devices:
+        print(f"  {d['index']:<8} {d['serial']}")
+
+
+def resolve_device_serial(device_spec) -> str:
+    try:
+        serials = RtlSdr.get_device_serial_addresses()
+        if isinstance(device_spec, int) and device_spec < len(serials):
+            return serials[device_spec]
+        elif isinstance(device_spec, str):
+            return device_spec
+    except Exception:
+        pass
+    return "unknown"
 
 
 def compute_power_spectrum(samples: np.ndarray, fft_size: int):
@@ -240,12 +287,17 @@ def samples_needed(interval_s: float, fft_size: int) -> int:
     return n
 
 
-def open_sdr(center_mhz: float, gain, ppm: int = 1) -> RtlSdr:
+def open_sdr(center_mhz: float, gain, ppm: int = 1, device_spec=0) -> RtlSdr:
     """Initialize and return a configured RtlSdr instance."""
-    sdr = RtlSdr()
-    sdr.sample_rate     = SAMPLE_RATE_HZ
-    sdr.center_freq     = int(center_mhz * 1e6)
-    sdr.freq_correction = ppm   # default 1 avoids Windows LIBUSB_ERROR_INVALID_PARAM
+    if isinstance(device_spec, str) and not device_spec.lstrip("-").isdigit():
+        sdr = RtlSdr(serial_number=device_spec)
+    else:
+        sdr = RtlSdr(device_index=int(device_spec))
+
+    sdr.sample_rate = SAMPLE_RATE_HZ
+    sdr.center_freq = int(center_mhz * 1e6)
+    if ppm != 0:
+        sdr.freq_correction = ppm
 
     if gain == "auto":
         sdr.gain = "auto"
@@ -309,12 +361,13 @@ def run_monitor(args) -> None:
 
     print("Opening SDR... ", end="", flush=True)
     try:
-        sdr = open_sdr(args.freq, args.gain, args.ppm)
+        sdr = open_sdr(args.freq, args.gain, args.ppm, args.device)
     except Exception as e:
         print(f"\nERROR: Could not open RTL-SDR: {e}")
         print("Check that the dongle is plugged in and drivers are installed.")
         sys.exit(1)
-    print(f"OK  (gain={sdr.gain})")
+    serial = resolve_device_serial(args.device)
+    print(f"OK  (device={serial}, gain={sdr.gain})")
     print("Starting sweep loop. Press Ctrl+C to stop.\n")
     print(f"  {'Timestamp':<26} {'Ph':<8} {'Rk'} {'IF freq (MHz)':<16} {'Power':>8}  {'Drift':>8}  Status")
     print(f"  {'-'*26} {'-'*7:<8} {'--'} {'-'*14:<16} {'-'*8}  {'-'*8}  {'-'*16}")
@@ -415,38 +468,60 @@ def run_monitor(args) -> None:
 
 def parse_args():
     p = argparse.ArgumentParser(description="NTMS 10 GHz Beacon Monitor via RTL-SDR")
-    p.add_argument("--freq",        type=float, default=DEFAULT_CENTER_MHZ,
+    p.add_argument("--list-devices", action="store_true",
+                   help="List connected RTL-SDR devices and exit")
+    p.add_argument("--device",
+                   default=_env("BEACON_DEVICE", DEFAULT_DEVICE),
+                   help="Device index (int) or serial number string (default: 0)")
+    p.add_argument("--freq",        type=float,
+                   default=float(_env("BEACON_FREQ_MHZ",       DEFAULT_CENTER_MHZ)),
                    help=f"IF center frequency in MHz (default: {DEFAULT_CENTER_MHZ})")
-    p.add_argument("--lo",          type=float, default=DEFAULT_LO_MHZ,
+    p.add_argument("--lo",          type=float,
+                   default=float(_env("BEACON_LO_MHZ",         DEFAULT_LO_MHZ)),
                    help=f"LNB LO frequency in MHz (default: {DEFAULT_LO_MHZ})")
-    p.add_argument("--interval",    type=float, default=DEFAULT_INTERVAL_S,
+    p.add_argument("--interval",    type=float,
+                   default=float(_env("BEACON_INTERVAL_S",     DEFAULT_INTERVAL_S)),
                    help=f"Sweep interval in seconds (default: {DEFAULT_INTERVAL_S})")
-    p.add_argument("--threshold",   type=float, default=DEFAULT_THRESHOLD_DB,
+    p.add_argument("--threshold",   type=float,
+                   default=float(_env("BEACON_THRESHOLD_DBFS", DEFAULT_THRESHOLD_DB)),
                    help=f"Detection threshold in dBFS (default: {DEFAULT_THRESHOLD_DB})")
-    p.add_argument("--gain",        type=str,   default=DEFAULT_GAIN,
+    p.add_argument("--gain",        type=str,
+                   default=_env("BEACON_GAIN",                  DEFAULT_GAIN),
                    help=f"RTL-SDR gain in dB, or 'auto' (default: {DEFAULT_GAIN})")
-    p.add_argument("--fft",         type=int,   default=DEFAULT_FFT_SIZE,
+    p.add_argument("--fft",         type=int,
+                   default=int(_env("BEACON_FFT_SIZE",          DEFAULT_FFT_SIZE)),
                    help=f"FFT size, power of 2 (default: {DEFAULT_FFT_SIZE})")
-    p.add_argument("--output",      type=str,   default=DEFAULT_OUTPUT,
+    p.add_argument("--output",      type=str,
+                   default=_env("BEACON_OUTPUT",                DEFAULT_OUTPUT),
                    help=f"Output CSV file path (default: {DEFAULT_OUTPUT})")
     p.add_argument("--duration",    type=float, default=0,
                    help="Run for this many seconds then exit (0=forever)")
-    p.add_argument("--ppm",         type=int,   default=1,
-                   help="PPM frequency correction (default: 1)")
-    p.add_argument("--cw-end",      type=int,   default=DEFAULT_CW_END_S,
+    p.add_argument("--ppm",         type=int,
+                   default=int(_env("BEACON_PPM",               DEFAULT_PPM)),
+                   help=f"PPM frequency correction (default: {DEFAULT_PPM})")
+    p.add_argument("--cw-end",      type=int,
+                   default=int(_env("BEACON_CW_END_S",          DEFAULT_CW_END_S)),
                    dest="cw_end",
                    help=f"Seconds into odd minute where CW ends (default: {DEFAULT_CW_END_S})")
-    p.add_argument("--max-signals", type=int,   default=DEFAULT_MAX_SIGNALS,
+    p.add_argument("--max-signals", type=int,
+                   default=int(_env("BEACON_MAX_SIGNALS",       DEFAULT_MAX_SIGNALS)),
                    dest="max_signals",
                    help=f"Max signals to detect per sweep, 1-5 (default: {DEFAULT_MAX_SIGNALS})")
-    p.add_argument("--location",    type=str,   default=DEFAULT_LOCATION,
+    p.add_argument("--location",    type=str,
+                   default=_env("BEACON_LOCATION",              DEFAULT_LOCATION),
                    help=f"Site identifier for CSV tagging (default: {DEFAULT_LOCATION})")
-    p.add_argument("--span",        type=float, default=DEFAULT_SPAN_KHZ,
+    p.add_argument("--span",        type=float,
+                   default=float(_env("BEACON_SPAN_KHZ",        DEFAULT_SPAN_KHZ)),
                    dest="span_khz",
-                   help=f"Analysis span in kHz centered on --freq (default: {DEFAULT_SPAN_KHZ} kHz = full capture). "
-                        f"Example: --span 100 limits peak search to +/-50 kHz.")
+                   help=f"Analysis span in kHz centered on --freq (default: {DEFAULT_SPAN_KHZ} kHz = full capture)")
     return p.parse_args()
 
 
 if __name__ == "__main__":
-    run_monitor(parse_args())
+    args = parse_args()
+    if args.list_devices:
+        print_device_list()
+        sys.exit(0)
+    if isinstance(args.device, str) and args.device.lstrip("-").isdigit():
+        args.device = int(args.device)
+    run_monitor(args)
