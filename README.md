@@ -38,6 +38,11 @@ Each CSV row is tagged with the current phase. Propagation analysis should filte
 ## Installation
 
 ```bash
+# Create and activate a virtual environment (recommended)
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
@@ -45,14 +50,53 @@ Windows users also need the librtlsdr DLL from https://github.com/librtlsdr/libr
 
 ## Configuration
 
-All settings live in a single Python config file. Copy the example and edit it for your station:
+All settings live in a single Python config file. First, create your copy of the example:
 
 ```bash
 cp beacon_config.example.py beacon_config.py
-# Edit beacon_config.py — set your SDR settings, location, and API credentials
 ```
 
-Every script auto-detects `beacon_config.py` in the current directory. No environment variables needed — just one file. CLI args still override config values when you need a one-off change.
+Then edit `beacon_config.py` and set the values for your station. Every script auto-detects `beacon_config.py` in the current directory — no environment variables needed. CLI args still override config values when you need a one-off change.
+
+### Required settings — you must change these
+
+| Setting | What to put |
+|---------|-------------|
+| `SDR_DEVICE` | `0` for the first dongle, or a serial string for a specific device. Run `rtl_test` to list devices. |
+| `SDR_FREQ_MHZ` | Your IF center frequency. Default `618.245` MHz is correct for a 9750 MHz LO and a 10368.370 MHz beacon. |
+| `SDR_LO_MHZ` | Your LNB LO frequency. `9750.0` for the Bullseye LNB. |
+| `SDR_PPM` | `0` for a TCXO dongle, `1`–`2` for a standard crystal dongle. |
+| `THRESHOLD_DBFS` | Detection threshold from calibration output. See [Station Calibration](#station-calibration) below. |
+| `LOCATION` | Your station identifier (e.g. `"W5ISP"`). Tagged on every CSV row. |
+| `API_URL` | API endpoint. Default points at the NTMS production API. |
+| `MONITOR_TOKEN` | Your station's API token from the beacon-monitor setup page. |
+| `BEACON_ID` | UUID of the beacon this station monitors. |
+| `REPORT` | `True` to enable inline API reporting, `False` for collection-only. |
+
+### Optional settings — defaults are fine for most stations
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `SDR_GAIN` | `"auto"` | R820T2/R828D gain in dB, or `"auto"` for per-sweep AGC. Set to a fixed value (e.g. `33.8`) from calibration for consistency. |
+| `SDR_FFT_SIZE` | `2048` | FFT bins. Larger values give finer frequency resolution but need more CPU. |
+| `SWEEP_INTERVAL_S` | `10` | Seconds between sweeps. |
+| `SWEEP_DURATION_S` | `0` | Seconds to run before exiting. `0` = run forever. |
+| `CW_END_S` | `10` | Seconds into the odd minute where CW ID ends. |
+| `SPAN_KHZ` | `2000` | Analysis span in kHz around center. |
+| `PASSBAND_KHZ` | `5` | ± bandwidth for in-band vs out-of-band power comparison. |
+| `CSV_PATH` | `"beacon_log.csv"` | Where to write the CSV log. Override with `--output`. |
+| `PHASE_FILTER` | `"CARRIER"` | Only upload rows matching this phase (`CARRIER`, `CW`, `Q65`, or `""` for all). |
+| `REPORTER_POLL_S` | `5` | Poll interval for the standalone reporter. |
+| `REPORTER_STATE_PATH` | `"beacon_reporter_state.json"` | State file for the standalone reporter. |
+
+### After editing
+
+Run the calibrator to find your optimal gain and threshold, then start monitoring:
+
+```bash
+python beacon_calibrate.py          # find gain + threshold
+python beacon_monitor.py            # start collecting + uploading
+```
 
 ## Station Calibration
 
