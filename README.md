@@ -254,6 +254,7 @@ Edit your `beacon_config.py` and restart:
 
 ```bash
 sudo systemctl restart beacon-monitor beacon-reporter
+```
 
 ## License
 
