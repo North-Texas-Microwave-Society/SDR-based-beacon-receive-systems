@@ -12,7 +12,7 @@ This project provides three Python scripts that together form a complete beacon 
 | `beacon_monitor.py` | RTL-SDR Blog V3 (or any RTL2832U dongle) | Capture, FFT analysis, phase detection, CSV logging |
 | `beacon_reporter.py` | (hardware-agnostic) | Tail CSV log, POST observations to NTMS API with retry/backoff |
 
-Three convenience shell scripts (`run_*.sh`) provide pre-configured launchers for Raspberry Pi deployments — see [Convenience Scripts](#convenience-scripts) below.
+Three convenience shell scripts (`run_*.sh`) provide pre-configured launchers for Raspberry Pi deployments -- see [Convenience Scripts](#convenience-scripts) below.
 
 ## Hardware
 
@@ -31,7 +31,7 @@ The beacon transmits on a 2-minute UTC cycle synchronized to the WSJT Q65 protoc
 |-------|--------|-------------|
 | `Q65` | Even minutes, 0–60 s | Digital mode, 500 kHz wide wandering tones |
 | `CW` | Odd minutes, 0–10 s | CW Morse ID, narrow carrier |
-| `CARRIER` | Odd minutes, 10–60 s | Steady carrier — best power measurement window |
+| `CARRIER` | Odd minutes, 10–60 s | Steady carrier -- best power measurement window |
 
 Each CSV row is tagged with the current phase. Propagation analysis should filter to `CARRIER` rows for the cleanest signal-strength data.
 
@@ -56,9 +56,9 @@ All settings live in a single Python config file. First, create your copy of the
 cp beacon_config.example.py beacon_config.py
 ```
 
-Then edit `beacon_config.py` and set the values for your station. Every script auto-detects `beacon_config.py` in the current directory — no environment variables needed. CLI args still override config values when you need a one-off change.
+Then edit `beacon_config.py` and set the values for your station. Every script auto-detects `beacon_config.py` in the current directory -- no environment variables needed. CLI args still override config values when you need a one-off change.
 
-### Required settings — you must change these
+### Required settings -- you must change these
 
 | Setting | What to put |
 |---------|-------------|
@@ -73,7 +73,7 @@ Then edit `beacon_config.py` and set the values for your station. Every script a
 | `BEACON_ID` | UUID of the beacon this station monitors. |
 | `REPORT` | `True` to enable inline API reporting, `False` for collection-only. |
 
-### Optional settings — defaults are fine for most stations
+### Optional settings -- defaults are fine for most stations
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -91,13 +91,13 @@ Then edit `beacon_config.py` and set the values for your station. Every script a
 
 ### After editing
 
-With `REPORT = True` and a valid `GRIDSQUARE` set, `beacon_monitor.py` handles everything — collecting, CSV logging, and uploading to the NTMS API — all in one process:
+With `REPORT = True` and a valid `GRIDSQUARE` set, `beacon_monitor.py` handles everything -- collecting, CSV logging, and uploading to the NTMS API -- all in one process:
 
 ```bash
-# First-time setup only — find optimal gain and threshold for your LNB-SDR system
+# First-time setup only -- find optimal gain and threshold for your LNB-SDR system
 python beacon_calibrate.py
 
-# Start monitoring — this is the only command you run day-to-day
+# Start monitoring -- this is the only command you run day-to-day
 python beacon_monitor.py
 ```
 
@@ -117,7 +117,7 @@ The script reads SDR settings from `beacon_config.py`. You can override any sett
 python beacon_calibrate.py --freq 618.245 --lo 9750.0 --margin 12.0
 ```
 
-The script steps through all R820T2/R828D gain settings (0–49.6 dB), measures the noise floor at each, and identifies the "knee" — the gain where LNB thermal noise begins to dominate over SDR ADC quantization noise. The optimal operating point is just past the knee; the threshold is set a fixed margin above that floor.
+The script steps through all R820T2/R828D gain settings (0–49.6 dB), measures the noise floor at each, and identifies the "knee" -- the gain where LNB thermal noise begins to dominate over SDR ADC quantization noise. The optimal operating point is just past the knee; the threshold is set a fixed margin above that floor.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -129,11 +129,11 @@ The script steps through all R820T2/R828D gain settings (0–49.6 dB), measures 
 | `--settle` | 0.5 s | Settle time after each gain change |
 | `--exclude` | 500 kHz | Exclusion zone around center when measuring noise |
 | `--margin` | 10.0 dB | Threshold margin above noise floor |
-| `--gains` | all | Gain values to test — `all` or comma-separated dB values |
+| `--gains` | all | Gain values to test -- `all` or comma-separated dB values |
 | `--device` | 0 | Device index or serial string |
 | `--output` | auto | CSV output file (default: `beacon_cal_<timestamp>.csv`) |
 
-Read the recommendation at the bottom of the output — it provides `--gain` and `--threshold` values to plug into `beacon_monitor.py`.
+Read the recommendation at the bottom of the output -- it provides `--gain` and `--threshold` values to plug into `beacon_monitor.py`.
 
 ## Usage
 
@@ -145,7 +145,7 @@ All settings come from `beacon_config.py`. Just run:
 python beacon_monitor.py
 ```
 
-With `REPORT = True` in your config, the monitor handles both data collection and API upload in a single process — no separate reporter needed. For one-off overrides:
+With `REPORT = True` in your config, the monitor handles both data collection and API upload in a single process -- no separate reporter needed. For one-off overrides:
 
 ```bash
 python beacon_monitor.py --gain 36.4 --threshold -35.0 --output /tmp/test.csv
@@ -162,9 +162,9 @@ python beacon_monitor.py --gain 36.4 --threshold -35.0 --output /tmp/test.csv
 | `--passband-khz` | 5 | ± bandwidth for signal vs noise separation |
 | `--duration` | 0 (forever) | Run time in seconds |
 
-R820T2 / R828D gain steps (dB): `0 0.9 1.4 2.7 3.7 7.7 8.7 12.5 14.4 15.7 16.6 19.7 20.7 22.9 25.4 28.0 29.7 32.8 33.8 36.4 37.2 38.6 40.2 42.1 43.4 43.9 44.5 48.0 49.6` — starting point for 10 GHz beacon work is typically 28–38 dB.
+R820T2 / R828D gain steps (dB): `0 0.9 1.4 2.7 3.7 7.7 8.7 12.5 14.4 15.7 16.6 19.7 20.7 22.9 25.4 28.0 29.7 32.8 33.8 36.4 37.2 38.6 40.2 42.1 43.4 43.9 44.5 48.0 49.6` -- starting point for 10 GHz beacon work is typically 28–38 dB.
 
-### Reporter (standalone — optional)
+### Reporter (standalone -- optional)
 
 The monitor's built-in `--report` mode handles uploading inline. Use the standalone reporter only when you need a separate process (backfilling old CSV data, or running monitor-only mode):
 
@@ -183,7 +183,7 @@ python beacon_reporter.py --phase-filter CARRIER --poll 5
 |--------|-------------|
 | `timestamp_utc` | ISO-8601 UTC timestamp of the sweep |
 | `beacon_phase` | `Q65`, `CW`, or `CARRIER` |
-| `peak_freq_hz` | IF peak frequency (Hz) — reflects LNB drift |
+| `peak_freq_hz` | IF peak frequency (Hz) -- reflects LNB drift |
 | `peak_power_dbfs` | Signal power at peak (dBFS) |
 | `freq_drift_hz` | Hz shift from last `CARRIER` reading (LNB thermal drift proxy) |
 | `above_threshold` | `1` if detected, `0` if below threshold |
@@ -213,21 +213,21 @@ python beacon_monitor.py          # collect + upload, all from config
 
 For a station that wants separate processes:
 ```bash
-# Terminal 1 — collect only (set REPORT = False in config, or use --no-report override)
+# Terminal 1 -- collect only (set REPORT = False in config, or use --no-report override)
 python beacon_monitor.py
 
-# Terminal 2 — backfill or separate reporter
+# Terminal 2 -- backfill or separate reporter
 python beacon_reporter.py
 ```
 
 ## Convenience Scripts
 
-Three shell scripts in the repo root provide one-command launchers for Raspberry Pi deployments. All settings come from `beacon_config.py` — no editing of shell scripts needed:
+Three shell scripts in the repo root provide one-command launchers for Raspberry Pi deployments. All settings come from `beacon_config.py` -- no editing of shell scripts needed:
 
 ```bash
 bash run_calibrate.sh    # Sweep gain settings, find optimal threshold
 bash run_monitor.sh      # Start data collection (+ API report if enabled in config)
-bash run_reporter.sh     # Standalone reporter (optional — monitor handles this via config)
+bash run_reporter.sh     # Standalone reporter (optional -- monitor handles this via config)
 ```
 
 These use the standard Pi deployment paths (`/opt/ntms-beacon/`). On a workstation, run the Python scripts directly.
@@ -247,7 +247,7 @@ The `pi/` directory contains a one-command installer that configures a headless 
 | USB-C power supply, 5V 3A | Official Pi supply preferred | $12 |
 | Case | Passive cooling is fine for this workload | $8–12 |
 
-Flash **Raspberry Pi OS Lite (64-bit)** using Raspberry Pi Imager. In the Imager advanced settings, pre-configure your WiFi credentials and enable SSH — the Pi will be network-accessible on first boot with no keyboard or monitor required.
+Flash **Raspberry Pi OS Lite (64-bit)** using Raspberry Pi Imager. In the Imager advanced settings, pre-configure your WiFi credentials and enable SSH -- the Pi will be network-accessible on first boot with no keyboard or monitor required.
 
 ### One-time install
 
@@ -307,7 +307,7 @@ sudo systemctl restart beacon-monitor beacon-reporter
 
 ## License
 
-MIT License — see LICENSE file for details.
+MIT License -- see LICENSE file for details.
 
 ## Contributing
 
