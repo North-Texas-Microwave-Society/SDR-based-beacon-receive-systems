@@ -64,9 +64,12 @@ Usage:
 import argparse
 import csv
 import datetime
+import json
 import os
 import sys
 import time
+import urllib.error
+import urllib.request
 
 import numpy as np
 
@@ -93,6 +96,8 @@ DEFAULT_MAX_SIGNALS   = 1
 DEFAULT_LOCATION      = "UNKNOWN"
 DEFAULT_SPAN_KHZ      = 2000       # analysis span in kHz (default = full 2 MHz capture)
 DEFAULT_PASSBAND_KHZ   = 5         # ± bandwidth for signal vs noise separation (kHz)
+DEFAULT_API_URL        = "https://prop.w5isp.com/api/v1/beacon-monitor/measurements"
+REPORTER_VERSION       = "2.0.0"
 DEFAULT_PPM           = 1
 DEFAULT_DEVICE        = 0
 SAMPLE_RATE_HZ        = 2_048_000  # 2.048 MSPS -- fits +/-1 MHz easily
@@ -110,6 +115,33 @@ CSV_FIELDS            = [
 def _env(name, default):
     """Return env var as string, or str(default) if unset. Lets systemd EnvironmentFile drive the script."""
     return os.environ.get(name, str(default))
+
+
+def load_config(path=None):
+    """Load beacon_config.py from cwd (or explicit path). Returns dict of settings.
+    Silently returns empty dict if the file doesn't exist."""
+    if path is None:
+        path = "beacon_config.py"
+    if not os.path.isfile(path):
+        return {}
+    namespace = {}
+    try:
+        with open(path) as f:
+            exec(f.read(), namespace)
+    except Exception as e:
+        print(f"WARNING: Could not load config file {path}: {e}")
+        return {}
+    return namespace
+
+
+def _cfg(config, key, env_var, default):
+    """Resolve a setting: config file > env var > hardcoded default."""
+    if config and key in config:
+        return config[key]
+    env_val = os.environ.get(env_var)
+    if env_val is not None:
+        return env_val
+    return default
 
 
 def get_device_list() -> list:
@@ -426,6 +458,72 @@ def append_rows(path: str, rows: list) -> None:
             w.writerow(row)
 
 
+# ---------------------------------------------------------------------------
+# API reporting (inline, single-attempt POST — CSV is the durable record)
+# ---------------------------------------------------------------------------
+
+def build_report_payload(row: dict, beacon_id: str,
+                         passband_hz_default: float, version: str) -> dict:
+    """Convert a CSV row dict into the NTMS Prop API measurement payload."""
+    peak_power = float(row.get("peak_power_dbfs", -999))
+    return {
+        "beacon_id"             : beacon_id,
+        "frequency_hz"          : int(float(row.get("center_freq_hz", 0))),
+        "measured_at"           : row.get("timestamp_utc", ""),
+        "integration_s"         : int(float(row.get("integration_s", 60))),
+        "passband_hz"           : float(row.get("passband_hz", passband_hz_default)),
+        "gain_db"               : float(row.get("gain_db", 0)),
+        "noise_floor_dbfs"      : float(row.get("noise_floor_dbfs", -999)),
+        "signal_peak_dbfs"      : float(peak_power),
+        "signal_avg_dbfs"       : float(row.get("signal_avg_dbfs", peak_power)),
+        "snr_peak_db"           : float(row.get("snr_peak_db", 0)),
+        "snr_avg_db"            : float(row.get("snr_avg_db", 0)),
+        "signal_active_fraction": float(row.get("signal_active_fraction", 0)),
+        "propmonitor_version"   : version
+    }
+
+
+def post_observation(url: str, monitor_token: str, payload: dict,
+                     dry_run: bool) -> bool:
+    """
+    POST a single measurement to the NTMS API.  Single attempt, no retry.
+    Returns True if the POST succeeded (204), False otherwise.
+    CSV is the durable record — failed POSTs can be backfilled later.
+    """
+    if dry_run:
+        print(f"  [DRY RUN] Would POST: {json.dumps(payload)}")
+        return True
+
+    data    = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type"  : "application/json",
+        "Authorization" : f"Bearer {monitor_token}",
+        "User-Agent"    : "NTMS-BeaconReporter/2.0"
+    }
+
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.getcode() == 204:
+                return True
+            body = resp.read(200).decode("utf-8", errors="replace")
+            print(f"  WARNING: API returned unexpected HTTP {resp.getcode()}: {body[:120]}")
+            return False
+    except urllib.error.HTTPError as e:
+        body = e.read(200).decode("utf-8", errors="replace")
+        if e.code == 401:
+            print(f"  FATAL: HTTP {e.code} — bad monitor token. Check NTMS_MONITOR_TOKEN.")
+            sys.exit(1)
+        print(f"  ERROR: HTTP {e.code} from API: {body[:120]}")
+        return False
+    except urllib.error.URLError as e:
+        print(f"  ERROR: Network error: {e.reason}")
+        return False
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
+
+
 def run_monitor(args) -> None:
     center_hz   = args.freq * 1e6
     lo_mhz      = args.lo
@@ -458,6 +556,14 @@ def run_monitor(args) -> None:
     print(f"  Samples/sweep : {n_samples:,}")
     print(f"  Output file   : {output_path}")
     print(f"  Duration      : {'forever' if duration == 0 else f'{duration}s'}")
+
+    report     = args.report
+    report_cnt = 0
+    if report:
+        print(f"  API endpoint  : {args.api_url}")
+        print(f"  Phase filter  : {args.phase_filter or '(none — uploading all phases)'}")
+        if args.dry_run:
+            print(f"  Dry run       : YES (no data sent)")
     print()
 
     init_csv(output_path)
@@ -582,71 +688,128 @@ def run_monitor(args) -> None:
             row_count   += len(csv_rows)
             sweep_count += 1
 
+            if report:
+                for row in csv_rows:
+                    phase = row.get("beacon_phase", "")
+                    if args.phase_filter and phase != args.phase_filter:
+                        continue
+                    payload = build_report_payload(row, args.beacon_id,
+                                                   passband_hz, REPORTER_VERSION)
+                    if post_observation(args.api_url, args.monitor_token,
+                                       payload, args.dry_run):
+                        report_cnt += 1
+                        pwr = float(row.get("peak_power_dbfs", -999))
+                        rf  = row.get("rf_freq_hz", "?")
+                        tag = "*** DETECTED ***" if pwr >= threshold else ""
+                        print(f"  \u2191 SENT  {rf} Hz  {pwr:+.1f} dBFS  {tag}".rstrip())
+
             next_sweep += interval_s
 
             if duration > 0 and (time.monotonic() - start_time) >= duration:
-                print(f"\nDuration {duration}s reached. {sweep_count} sweeps, {row_count} rows logged.")
+                msg = f"\nDuration {duration}s reached. {sweep_count} sweeps, {row_count} rows logged to {output_path}"
+                if report and report_cnt:
+                    msg += f"  ({report_cnt} reported)"
+                print(msg)
                 break
 
     except KeyboardInterrupt:
-        print(f"\nStopped by user. {sweep_count} sweeps, {row_count} rows logged to {output_path}")
+        msg = f"\nStopped by user. {sweep_count} sweeps, {row_count} rows logged to {output_path}"
+        if report and report_cnt:
+            msg += f"  ({report_cnt} reported)"
+        print(msg)
 
     finally:
         sdr.close()
 
 
 def parse_args():
+    # --- Auto-load beacon_config.py from cwd (or explicit --config path) ---
+    config_path = "beacon_config.py"
+    for i, a in enumerate(sys.argv):
+        if i == 0:
+            continue
+        if a == "--config" and i + 1 < len(sys.argv):
+            config_path = sys.argv[i + 1]
+            break
+        if a.startswith("--config="):
+            config_path = a.split("=", 1)[1]
+            break
+    config = load_config(config_path) if config_path else load_config()
+
+    def c(key, env_var, default):
+        return _cfg(config, key, env_var, default)
+
     p = argparse.ArgumentParser(description="NTMS 10 GHz Beacon Monitor via RTL-SDR")
+    p.add_argument("--config", default=None,
+                   help="Optional path to beacon_config.py (default: auto-detect in cwd)")
     p.add_argument("--list-devices", action="store_true",
                    help="List connected RTL-SDR devices and exit")
     p.add_argument("--device",
-                   default=_env("BEACON_DEVICE", DEFAULT_DEVICE),
-                   help="Device index (int) or serial number string (default: 0)")
-    p.add_argument("--freq",        type=float,
-                   default=float(_env("BEACON_FREQ_MHZ",       DEFAULT_CENTER_MHZ)),
+                   default=c("SDR_DEVICE", "BEACON_DEVICE", DEFAULT_DEVICE),
+                   help="Device index (int) or serial number string")
+    p.add_argument("--freq", type=float,
+                   default=float(c("SDR_FREQ_MHZ", "BEACON_FREQ_MHZ", DEFAULT_CENTER_MHZ)),
                    help=f"IF center frequency in MHz (default: {DEFAULT_CENTER_MHZ})")
-    p.add_argument("--lo",          type=float,
-                   default=float(_env("BEACON_LO_MHZ",         DEFAULT_LO_MHZ)),
+    p.add_argument("--lo", type=float,
+                   default=float(c("SDR_LO_MHZ", "BEACON_LO_MHZ", DEFAULT_LO_MHZ)),
                    help=f"LNB LO frequency in MHz (default: {DEFAULT_LO_MHZ})")
-    p.add_argument("--interval",    type=float,
-                   default=float(_env("BEACON_INTERVAL_S",     DEFAULT_INTERVAL_S)),
+    p.add_argument("--interval", type=float,
+                   default=float(c("SWEEP_INTERVAL_S", "BEACON_INTERVAL_S", DEFAULT_INTERVAL_S)),
                    help=f"Sweep interval in seconds (default: {DEFAULT_INTERVAL_S})")
-    p.add_argument("--threshold",   type=float,
-                   default=float(_env("BEACON_THRESHOLD_DBFS", DEFAULT_THRESHOLD_DB)),
+    p.add_argument("--threshold", type=float,
+                   default=float(c("THRESHOLD_DBFS", "BEACON_THRESHOLD_DBFS", DEFAULT_THRESHOLD_DB)),
                    help=f"Detection threshold in dBFS (default: {DEFAULT_THRESHOLD_DB})")
-    p.add_argument("--gain",        type=str,
-                   default=_env("BEACON_GAIN",                  DEFAULT_GAIN),
+    p.add_argument("--gain", type=str,
+                   default=str(c("SDR_GAIN", "BEACON_GAIN", DEFAULT_GAIN)),
                    help=f"RTL-SDR gain in dB, or 'auto' (default: {DEFAULT_GAIN})")
-    p.add_argument("--fft",         type=int,
-                   default=int(_env("BEACON_FFT_SIZE",          DEFAULT_FFT_SIZE)),
+    p.add_argument("--fft", type=int,
+                   default=int(c("SDR_FFT_SIZE", "BEACON_FFT_SIZE", DEFAULT_FFT_SIZE)),
                    help=f"FFT size, power of 2 (default: {DEFAULT_FFT_SIZE})")
-    p.add_argument("--output",      type=str,
-                   default=_env("BEACON_OUTPUT",                DEFAULT_OUTPUT),
+    p.add_argument("--output", type=str,
+                   default=str(c("CSV_PATH", "BEACON_OUTPUT", DEFAULT_OUTPUT)),
                    help=f"Output CSV file path (default: {DEFAULT_OUTPUT})")
-    p.add_argument("--duration",    type=float, default=0,
+    p.add_argument("--duration", type=float,
+                   default=float(c("SWEEP_DURATION_S", "", 0)),
                    help="Run for this many seconds then exit (0=forever)")
-    p.add_argument("--ppm",         type=int,
-                   default=int(_env("BEACON_PPM",               DEFAULT_PPM)),
+    p.add_argument("--ppm", type=int,
+                   default=int(c("SDR_PPM", "BEACON_PPM", DEFAULT_PPM)),
                    help=f"PPM frequency correction (default: {DEFAULT_PPM})")
-    p.add_argument("--cw-end",      type=int,
-                   default=int(_env("BEACON_CW_END_S",          DEFAULT_CW_END_S)),
+    p.add_argument("--cw-end", type=int,
+                   default=int(c("CW_END_S", "BEACON_CW_END_S", DEFAULT_CW_END_S)),
                    dest="cw_end",
                    help=f"Seconds into odd minute where CW ends (default: {DEFAULT_CW_END_S})")
     p.add_argument("--max-signals", type=int,
-                   default=int(_env("BEACON_MAX_SIGNALS",       DEFAULT_MAX_SIGNALS)),
+                   default=int(c("MAX_SIGNALS", "BEACON_MAX_SIGNALS", DEFAULT_MAX_SIGNALS)),
                    dest="max_signals",
                    help=f"Max signals to detect per sweep, 1-5 (default: {DEFAULT_MAX_SIGNALS})")
-    p.add_argument("--location",    type=str,
-                   default=_env("BEACON_LOCATION",              DEFAULT_LOCATION),
+    p.add_argument("--location", type=str,
+                   default=str(c("LOCATION", "BEACON_LOCATION", DEFAULT_LOCATION)),
                    help=f"Site identifier for CSV tagging (default: {DEFAULT_LOCATION})")
-    p.add_argument("--span",        type=float,
-                   default=float(_env("BEACON_SPAN_KHZ",        DEFAULT_SPAN_KHZ)),
+    p.add_argument("--span", type=float,
+                   default=float(c("SPAN_KHZ", "BEACON_SPAN_KHZ", DEFAULT_SPAN_KHZ)),
                    dest="span_khz",
-                   help=f"Analysis span in kHz centered on --freq (default: {DEFAULT_SPAN_KHZ} kHz = full capture)")
+                   help=f"Analysis span in kHz centered on --freq (default: {DEFAULT_SPAN_KHZ})")
     p.add_argument("--passband-khz", type=float,
-                   default=float(_env("BEACON_PASSBAND_KHZ",    DEFAULT_PASSBAND_KHZ)),
+                   default=float(c("PASSBAND_KHZ", "BEACON_PASSBAND_KHZ", DEFAULT_PASSBAND_KHZ)),
                    dest="passband_khz",
                    help=f"± bandwidth in kHz for signal vs noise separation (default: {DEFAULT_PASSBAND_KHZ})")
+    p.add_argument("--report", action="store_true",
+                   default=c("REPORT", "", False),
+                   help="After each sweep, POST observations to the NTMS API")
+    p.add_argument("--monitor-token",
+                   default=str(c("MONITOR_TOKEN", "NTMS_MONITOR_TOKEN", "")),
+                   help="Monitor token for NTMS API authentication")
+    p.add_argument("--beacon-id",
+                   default=str(c("BEACON_ID", "NTMS_BEACON_ID", "")),
+                   help="Beacon UUID for NTMS API")
+    p.add_argument("--api-url",
+                   default=str(c("API_URL", "NTMS_API_URL", DEFAULT_API_URL)),
+                   help="NTMS API endpoint URL")
+    p.add_argument("--phase-filter",
+                   default=str(c("PHASE_FILTER", "NTMS_PHASE_FILTER", "")),
+                   help="Only upload rows matching this beacon_phase (e.g. CARRIER)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print payloads but do not POST to API")
     return p.parse_args()
 
 
@@ -657,4 +820,9 @@ if __name__ == "__main__":
         sys.exit(0)
     if isinstance(args.device, str) and args.device.lstrip("-").isdigit():
         args.device = int(args.device)
+    if args.report and not args.dry_run:
+        if not args.monitor_token or not args.beacon_id:
+            print("ERROR: --report requires --monitor-token and --beacon-id "
+                  "(set them in beacon_config.py or via env vars)")
+            sys.exit(1)
     run_monitor(args)

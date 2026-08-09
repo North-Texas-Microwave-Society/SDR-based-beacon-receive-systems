@@ -75,6 +75,32 @@ def _env(name, default):
     return os.environ.get(name, str(default))
 
 
+def load_config(path=None):
+    """Load beacon_config.py from cwd (or explicit path). Returns dict of settings."""
+    if path is None:
+        path = "beacon_config.py"
+    if not os.path.isfile(path):
+        return {}
+    namespace = {}
+    try:
+        with open(path) as f:
+            exec(f.read(), namespace)
+    except Exception as e:
+        print(f"WARNING: Could not load config file {path}: {e}")
+        return {}
+    return namespace
+
+
+def _cfg(config, key, env_var, default):
+    """Resolve a setting: config file > env var > hardcoded default."""
+    if config and key in config:
+        return config[key]
+    env_val = os.environ.get(env_var)
+    if env_val is not None:
+        return env_val
+    return default
+
+
 def compute_power_spectrum(samples: np.ndarray, fft_size: int):
     n_frames = len(samples) // fft_size
     if n_frames == 0:
@@ -262,31 +288,56 @@ def run_calibration(args) -> None:
 
 
 def parse_args():
+    # --- Auto-load beacon_config.py from cwd (or explicit --config path) ---
+    config_path = "beacon_config.py"
+    for i, a in enumerate(sys.argv):
+        if i == 0:
+            continue
+        if a == "--config" and i + 1 < len(sys.argv):
+            config_path = sys.argv[i + 1]
+            break
+        if a.startswith("--config="):
+            config_path = a.split("=", 1)[1]
+            break
+    config = load_config(config_path)
+
+    def c(key, env_var, default):
+        return _cfg(config, key, env_var, default)
+
     p = argparse.ArgumentParser(
         description="NTMS 10 GHz Beacon Station Calibrator — gain sweep and noise floor analysis"
     )
+    p.add_argument("--config", default=None,
+                   help="Optional path to beacon_config.py (default: auto-detect in cwd)")
     p.add_argument("--freq",    type=float,
-                   default=float(_env("BEACON_FREQ_MHZ", DEFAULT_CENTER_MHZ)),
+                   default=float(c("SDR_FREQ_MHZ", "BEACON_FREQ_MHZ", DEFAULT_CENTER_MHZ)),
                    help=f"IF center frequency in MHz (default: {DEFAULT_CENTER_MHZ})")
     p.add_argument("--lo",      type=float,
-                   default=float(_env("BEACON_LO_MHZ",   DEFAULT_LO_MHZ)),
+                   default=float(c("SDR_LO_MHZ", "BEACON_LO_MHZ", DEFAULT_LO_MHZ)),
                    help=f"LNB LO frequency in MHz (default: {DEFAULT_LO_MHZ})")
     p.add_argument("--ppm",     type=int,
-                   default=int(_env("BEACON_PPM",         DEFAULT_PPM)),
+                   default=int(c("SDR_PPM", "BEACON_PPM", DEFAULT_PPM)),
                    help=f"PPM frequency correction (default: {DEFAULT_PPM})")
-    p.add_argument("--fft",     type=int,   default=DEFAULT_FFT_SIZE,
+    p.add_argument("--fft",     type=int,
+                   default=int(c("SDR_FFT_SIZE", "BEACON_FFT_SIZE", DEFAULT_FFT_SIZE)),
                    help=f"FFT size, power of 2 (default: {DEFAULT_FFT_SIZE})")
-    p.add_argument("--dwell",   type=float, default=DEFAULT_DWELL_S,
+    p.add_argument("--dwell",   type=float,
+                   default=float(c("CAL_DWELL_S", "", DEFAULT_DWELL_S)),
                    help=f"Seconds of IQ data to collect per gain step (default: {DEFAULT_DWELL_S})")
-    p.add_argument("--settle",  type=float, default=DEFAULT_SETTLE_S,
+    p.add_argument("--settle",  type=float,
+                   default=float(c("CAL_SETTLE_S", "", DEFAULT_SETTLE_S)),
                    help=f"Settle time after each gain change in seconds (default: {DEFAULT_SETTLE_S})")
-    p.add_argument("--exclude", type=float, default=DEFAULT_EXCLUDE_KHZ,
-                   help=f"Exclusion zone ±kHz around center when measuring noise (default: {DEFAULT_EXCLUDE_KHZ})")
-    p.add_argument("--margin",  type=float, default=DEFAULT_MARGIN_DB,
+    p.add_argument("--exclude", type=float,
+                   default=float(c("CAL_EXCLUDE_KHZ", "", DEFAULT_EXCLUDE_KHZ)),
+                   help=f"Exclusion zone ±kHz around center (default: {DEFAULT_EXCLUDE_KHZ})")
+    p.add_argument("--margin",  type=float,
+                   default=float(c("CAL_MARGIN_DB", "", DEFAULT_MARGIN_DB)),
                    help=f"Threshold margin above noise floor in dB (default: {DEFAULT_MARGIN_DB})")
-    p.add_argument("--gains",   type=str,   default="all",
+    p.add_argument("--gains",   type=str,
+                   default=str(c("CAL_GAINS", "", "all")),
                    help="Comma-separated gain values to test in dB, or 'all' (default: all R820T2 steps)")
-    p.add_argument("--device",  default=DEFAULT_DEVICE,
+    p.add_argument("--device",
+                   default=c("SDR_DEVICE", "BEACON_DEVICE", DEFAULT_DEVICE),
                    help="Device index (int) or serial number string (default: 0)")
     p.add_argument("--output",  type=str,   default=None,
                    help="CSV output file (default: beacon_cal_<UTC timestamp>.csv)")

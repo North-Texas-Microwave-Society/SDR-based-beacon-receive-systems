@@ -1,3 +1,6 @@
+# Local config (copy from example and edit)
+beacon_config.py
+
 # Python
 __pycache__/
 *.py[cod]

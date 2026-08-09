@@ -43,13 +43,29 @@ pip install -r requirements.txt
 
 Windows users also need the librtlsdr DLL from https://github.com/librtlsdr/librtlsdr/releases
 
+## Configuration
+
+All settings live in a single Python config file. Copy the example and edit it for your station:
+
+```bash
+cp beacon_config.example.py beacon_config.py
+# Edit beacon_config.py — set your SDR settings, location, and API credentials
+```
+
+Every script auto-detects `beacon_config.py` in the current directory. No environment variables needed — just one file. CLI args still override config values when you need a one-off change.
+
 ## Station Calibration
 
 Before monitoring, run the calibrator to find the optimal gain and detection threshold for your LNB-SDR system:
 
 ```bash
 # Point dish at cold sky (away from beacon, sun, and ground clutter), then:
-python beacon_calibrate.py --freq 618.245 --lo 9750.0
+python beacon_calibrate.py
+```
+
+The script reads SDR settings from `beacon_config.py`. You can override any setting on the command line:
+```bash
+python beacon_calibrate.py --freq 618.245 --lo 9750.0 --margin 12.0
 ```
 
 The script steps through all R820T2/R828D gain settings (0–49.6 dB), measures the noise floor at each, and identifies the "knee" — the gain where LNB thermal noise begins to dominate over SDR ADC quantization noise. The optimal operating point is just past the knee; the threshold is set a fixed margin above that floor.
@@ -72,15 +88,18 @@ Read the recommendation at the bottom of the output — it provides `--gain` and
 
 ## Usage
 
-### Monitor (data collection)
+### Monitor (data collection + optional API reporting)
+
+All settings come from `beacon_config.py`. Just run:
 
 ```bash
-python beacon_monitor.py \
-    --freq 618.245 \
-    --lo 9750.0 \
-    --interval 10 \
-    --threshold -50.0 \
-    --output beacon_log.csv
+python beacon_monitor.py
+```
+
+With `REPORT = True` in your config, the monitor handles both data collection and API upload in a single process — no separate reporter needed. For one-off overrides:
+
+```bash
+python beacon_monitor.py --gain 36.4 --threshold -35.0 --output /tmp/test.csv
 ```
 
 | Option | Default | Description |
@@ -96,36 +115,18 @@ python beacon_monitor.py \
 
 R820T2 / R828D gain steps (dB): `0 0.9 1.4 2.7 3.7 7.7 8.7 12.5 14.4 15.7 16.6 19.7 20.7 22.9 25.4 28.0 29.7 32.8 33.8 36.4 37.2 38.6 40.2 42.1 43.4 43.9 44.5 48.0 49.6` — starting point for 10 GHz beacon work is typically 28–38 dB.
 
-### Reporter (data upload)
+### Reporter (standalone — optional)
+
+The monitor's built-in `--report` mode handles uploading inline. Use the standalone reporter only when you need a separate process (backfilling old CSV data, or running monitor-only mode):
 
 ```bash
-python beacon_reporter.py \
-    --monitor-token  YOUR_MONITOR_TOKEN \
-    --beacon-id      550e8400-e29b-41d4-a716-446655440000 \
-    --phase-filter   CARRIER
-```
-
-Credentials can also be supplied via environment variables:
-
-```bash
-export NTMS_API_URL=https://prop.w5isp.com/api/v1/beacon-monitor/measurements
-export NTMS_MONITOR_TOKEN=YOUR_MONITOR_TOKEN
-export NTMS_BEACON_ID=your_beacon_uuid_here
-export NTMS_PHASE_FILTER=CARRIER
 python beacon_reporter.py
 ```
 
-Use `--dry-run` to verify operation without sending real data.
-Pass `--phase-filter CARRIER` (or set `NTMS_PHASE_FILTER=CARRIER`) to only upload steady-carrier rows — the best data for propagation analysis.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--monitor-token` | (required) | Monitor token from your prop.w5isp.com setup page |
-| `--beacon-id` | (required) | Beacon UUID string |
-| `--phase-filter` | (none) | Only upload rows matching this `beacon_phase` (e.g. `CARRIER`) |
-| `--passband-hz` | 5000 | Passband in Hz, fallback if CSV lacks the field |
-| `--version` | 2.0.0 | PropMonitor version reported in payload |
-| `--poll` | 5 s | Poll interval for new CSV rows |
+Settings come from `beacon_config.py`. Override as needed:
+```bash
+python beacon_reporter.py --phase-filter CARRIER --poll 5
+```
 
 ## CSV Log Format
 
@@ -153,27 +154,34 @@ Pass `--phase-filter CARRIER` (or set `NTMS_PHASE_FILTER=CARRIER`) to only uploa
 
 Because the beacon is GPS-locked, any sweep-to-sweep shift in `peak_freq_hz` reflects LNB LO thermal drift rather than beacon frequency instability. The `freq_drift_hz` column tracks this, using successive `CARRIER`-phase readings as reference points.
 
-## Running Both Scripts Together
+## Running
+
+With `REPORT = True` in `beacon_config.py`, the monitor handles everything in one process:
 
 ```bash
-# Terminal 1 — collect data
-python beacon_monitor.py --output beacon_log.csv
+python beacon_monitor.py          # collect + upload, all from config
+```
 
-# Terminal 2 — upload data
-python beacon_reporter.py --monitor-token YOUR_TOKEN --beacon-id YOUR_BEACON_ID
+For a station that wants separate processes:
+```bash
+# Terminal 1 — collect only (set REPORT = False in config, or use --no-report override)
+python beacon_monitor.py
+
+# Terminal 2 — backfill or separate reporter
+python beacon_reporter.py
 ```
 
 ## Convenience Scripts
 
-Three shell scripts in the repo root provide pre-configured launchers for Raspberry Pi deployments. Edit the variables at the top of each script to match your station, then run directly:
+Three shell scripts in the repo root provide one-command launchers for Raspberry Pi deployments. All settings come from `beacon_config.py` — no editing of shell scripts needed:
 
 ```bash
 bash run_calibrate.sh    # Sweep gain settings, find optimal threshold
-bash run_monitor.sh      # Start data collection
-bash run_reporter.sh     # Start API reporter
+bash run_monitor.sh      # Start data collection (+ API report if enabled in config)
+bash run_reporter.sh     # Standalone reporter (optional — monitor handles this via config)
 ```
 
-These assume the standard Pi deployment paths (`/opt/ntms-beacon/`). On a workstation, run the Python scripts directly instead.
+These use the standard Pi deployment paths (`/opt/ntms-beacon/`). On a workstation, run the Python scripts directly.
 
 ---
 
@@ -242,43 +250,10 @@ sudo systemctl restart beacon-monitor beacon-reporter
 
 ### Reconfiguring a station
 
-Edit the systemd drop-in override files directly, then restart:
+Edit your `beacon_config.py` and restart:
 
 ```bash
-sudo systemctl edit beacon-monitor
-sudo systemctl edit beacon-reporter
-sudo systemctl daemon-reload
 sudo systemctl restart beacon-monitor beacon-reporter
-```
-
-The drop-in files are stored at:
-
-| Service | Drop-in path |
-|---------|-------------|
-| `beacon-monitor` | `/etc/systemd/system/beacon-monitor.service.d/override.conf` |
-| `beacon-reporter` | `/etc/systemd/system/beacon-reporter.service.d/override.conf` |
-
-Each file has `[Service]` and `Environment=` lines (one per variable).  The
-`pi/placeholders/` directory contains templates showing all available variables
-with placeholder values.
-
-Key environment variables:
-
-| Variable | Description |
-|----------|-------------|
-| `NTMS_MONITOR_TOKEN` | Monitor token from prop.w5isp.com |
-| `NTMS_BEACON_ID` | Beacon UUID string |
-| `NTMS_GRIDSQUARE` | Maidenhead gridsquare (e.g. FN31pr) |
-| `NTMS_ANTENNA_HEIGHT_FT` | Antenna height in feet (optional) |
-| `NTMS_API_URL` | API endpoint (default: `https://prop.w5isp.com/api/v1/beacon-monitor/measurements`) |
-| `NTMS_PHASE_FILTER` | Only upload rows matching this phase (e.g. `CARRIER`) |
-| `BEACON_FREQ_MHZ` | IF center frequency in MHz (default: 618.245) |
-| `BEACON_LO_MHZ` | LNB LO frequency in MHz (default: 9750.0) |
-| `BEACON_PASSBAND_KHZ` | ± bandwidth in kHz for signal vs noise separation (default: 5) |
-| `BEACON_GAIN` | SDR gain in dB or `auto` (default: `auto`) |
-| `BEACON_PPM` | PPM correction (default: 0 for TCXO, 1–2 for crystal) |
-
-Or re-run the installer — it detects the existing config and asks before overwriting it.
 
 ## License
 

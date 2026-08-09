@@ -59,6 +59,36 @@ INITIAL_BACKOFF = 5     # seconds
 
 
 # ---------------------------------------------------------------------------
+# Config file helpers (shared with beacon_monitor.py / beacon_calibrate.py)
+# ---------------------------------------------------------------------------
+
+def load_config(path=None):
+    """Load beacon_config.py from cwd (or explicit path). Returns dict of settings."""
+    if path is None:
+        path = "beacon_config.py"
+    if not os.path.isfile(path):
+        return {}
+    namespace = {}
+    try:
+        with open(path) as f:
+            exec(f.read(), namespace)
+    except Exception as e:
+        print(f"WARNING: Could not load config file {path}: {e}")
+        return {}
+    return namespace
+
+
+def _cfg(config, key, env_var, default):
+    """Resolve a setting: config file > env var > hardcoded default."""
+    if config and key in config:
+        return config[key]
+    env_val = os.environ.get(env_var)
+    if env_val is not None:
+        return env_val
+    return default
+
+
+# ---------------------------------------------------------------------------
 # State management (persists CSV read position across restarts)
 # ---------------------------------------------------------------------------
 
@@ -330,37 +360,53 @@ def run_reporter(args) -> None:
 
 
 def parse_args():
+    # --- Auto-load beacon_config.py from cwd (or explicit --config path) ---
+    config_path = "beacon_config.py"
+    for i, a in enumerate(sys.argv):
+        if i == 0:
+            continue
+        if a == "--config" and i + 1 < len(sys.argv):
+            config_path = sys.argv[i + 1]
+            break
+        if a.startswith("--config="):
+            config_path = a.split("=", 1)[1]
+            break
+    config = load_config(config_path)
+
+    def c(key, env_var, default):
+        return _cfg(config, key, env_var, default)
+
     p = argparse.ArgumentParser(
         description="NTMS Beacon Reporter — posts CSV log to NTMS Prop API")
-
+    p.add_argument("--config", default=None,
+                   help="Optional path to beacon_config.py (default: auto-detect in cwd)")
     p.add_argument("--input",
-                   default=os.environ.get("NTMS_INPUT", DEFAULT_INPUT),
+                   default=str(c("CSV_PATH", "NTMS_INPUT", DEFAULT_INPUT)),
                    help=f"CSV file to watch (default: {DEFAULT_INPUT})")
     p.add_argument("--api",
-                   default=os.environ.get("NTMS_API_URL", DEFAULT_API_URL),
-                   help="NTMS API endpoint URL (or set NTMS_API_URL)")
+                   default=str(c("API_URL", "NTMS_API_URL", DEFAULT_API_URL)),
+                   help="NTMS API endpoint URL")
     p.add_argument("--monitor-token",
-                   default=os.environ.get("NTMS_MONITOR_TOKEN", ""),
-                   help="Monitor token from prop.w5isp.com "
-                        "(or set NTMS_MONITOR_TOKEN)")
+                   default=str(c("MONITOR_TOKEN", "NTMS_MONITOR_TOKEN", "")),
+                   help="Monitor token from prop.w5isp.com")
     p.add_argument("--beacon-id",
-                   default=os.environ.get("NTMS_BEACON_ID", ""),
-                   help="Beacon UUID string (or set NTMS_BEACON_ID)")
+                   default=str(c("BEACON_ID", "NTMS_BEACON_ID", "")),
+                   help="Beacon UUID string")
     p.add_argument("--phase-filter",
-                   default=os.environ.get("NTMS_PHASE_FILTER", ""),
-                   help="Only upload rows matching this beacon_phase "
-                        "(e.g. CARRIER)")
+                   default=str(c("PHASE_FILTER", "NTMS_PHASE_FILTER", "")),
+                   help="Only upload rows matching this beacon_phase (e.g. CARRIER)")
     p.add_argument("--passband-hz", type=float,
-                   default=float(os.environ.get("NTMS_PASSBAND_HZ",
-                                 str(DEFAULT_PASSBAND_HZ))),
-                   help="Passband in Hz, fallback if CSV lacks field "
-                        f"(default: {DEFAULT_PASSBAND_HZ})")
-    p.add_argument("--version", type=str, default="2.0.0",
+                   default=float(c("PASSBAND_KHZ", "NTMS_PASSBAND_HZ", DEFAULT_PASSBAND_HZ)),
+                   help=f"Passband in Hz, fallback if CSV lacks field (default: {DEFAULT_PASSBAND_HZ})")
+    p.add_argument("--version", type=str,
+                   default=str(c("REPORTER_VERSION", "", "2.0.0")),
                    dest="propmonitor_version",
                    help="PropMonitor version string (default: 2.0.0)")
-    p.add_argument("--poll", type=float, default=DEFAULT_POLL,
+    p.add_argument("--poll", type=float,
+                   default=float(c("REPORTER_POLL_S", "", DEFAULT_POLL)),
                    help=f"Poll interval in seconds (default: {DEFAULT_POLL})")
-    p.add_argument("--state", default=DEFAULT_STATE,
+    p.add_argument("--state",
+                   default=str(c("REPORTER_STATE_PATH", "", DEFAULT_STATE)),
                    help=f"State file path (default: {DEFAULT_STATE})")
     p.add_argument("--dry-run", action="store_true",
                    help="Print payloads without actually POSTing")
@@ -370,9 +416,9 @@ def parse_args():
     # Validate required fields
     missing = []
     if not args.monitor_token:
-        missing.append("--monitor-token (or NTMS_MONITOR_TOKEN)")
+        missing.append("--monitor-token (set MONITOR_TOKEN in beacon_config.py)")
     if not args.beacon_id:
-        missing.append("--beacon-id (or NTMS_BEACON_ID)")
+        missing.append("--beacon-id (set BEACON_ID in beacon_config.py)")
 
     if missing:
         print("ERROR: Missing required arguments:")
