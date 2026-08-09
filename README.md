@@ -8,15 +8,13 @@ This project provides three Python scripts that together form a complete beacon 
 
 | Script | Hardware | Purpose |
 |--------|----------|---------|
+| `beacon_calibrate.py` | RTL-SDR Blog V3 (or any RTL2832U dongle) | Sweep gain settings, find optimal gain and detection threshold |
 | `beacon_monitor.py` | RTL-SDR Blog V3 (or any RTL2832U dongle) | Capture, FFT analysis, phase detection, CSV logging |
-| `beacon_monitor_nesdr.py` | NooElec NESDR Smart / Smart XTR / Smart v5 | Same pipeline with NESDR device enumeration, serial tracking, and TCXO-optimized PPM defaults |
 | `beacon_reporter.py` | (hardware-agnostic) | Tail CSV log, POST observations to NTMS API with retry/backoff |
 
-Both monitor scripts produce the same CSV format and feed the same reporter.
+Three convenience shell scripts (`run_*.sh`) provide pre-configured launchers for Raspberry Pi deployments — see [Convenience Scripts](#convenience-scripts) below.
 
 ## Hardware
-
-### Generic RTL-SDR (beacon_monitor.py)
 
 | Component | Details |
 |-----------|---------|
@@ -24,17 +22,6 @@ Both monitor scripts produce the same CSV format and feed the same reporter.
 | Downconverter | "Bullseye" LNB, LO = 9750 MHz (no 22 kHz tone required) |
 | Beacon frequency | 10368.370 MHz → 618.370 MHz IF |
 | Capture bandwidth | ±1 MHz (no retuning needed) |
-
-### NooElec NESDR Smart (beacon_monitor_nesdr.py)
-
-| Variant | Tuner | Oscillator | PPM |
-|---------|-------|------------|-----|
-| NESDR Smart | R820T2 | Standard crystal | ~1–2 ppm |
-| NESDR Smart XTR | R820T2 | TCXO 0.5 ppm | **0** (default) |
-| NESDR Smart v5 | R828D | TCXO | **0** (default) |
-| NESDR SMArt | R820T2 | Standard crystal | ~1–2 ppm |
-
-All NESDR Smart variants use the same pyrtlsdr/librtlsdr driver. The NESDR-specific script adds device enumeration, selection by serial number, and records the device serial in the CSV.
 
 ## Beacon Cycle
 
@@ -51,14 +38,41 @@ Each CSV row is tagged with the current phase. Propagation analysis should filte
 ## Installation
 
 ```bash
-pip install pyrtlsdr numpy
+pip install -r requirements.txt
 ```
 
 Windows users also need the librtlsdr DLL from https://github.com/librtlsdr/librtlsdr/releases
 
+## Station Calibration
+
+Before monitoring, run the calibrator to find the optimal gain and detection threshold for your LNB-SDR system:
+
+```bash
+# Point dish at cold sky (away from beacon, sun, and ground clutter), then:
+python beacon_calibrate.py --freq 618.245 --lo 9750.0
+```
+
+The script steps through all R820T2/R828D gain settings (0–49.6 dB), measures the noise floor at each, and identifies the "knee" — the gain where LNB thermal noise begins to dominate over SDR ADC quantization noise. The optimal operating point is just past the knee; the threshold is set a fixed margin above that floor.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--freq` | 618.245 MHz | SDR center frequency (IF after LNB) |
+| `--lo` | 9750.0 MHz | LNB LO frequency |
+| `--ppm` | 1 | PPM correction |
+| `--fft` | 4096 | FFT size, power of 2 |
+| `--dwell` | 2.0 s | Seconds of data collected per gain step |
+| `--settle` | 0.5 s | Settle time after each gain change |
+| `--exclude` | 500 kHz | Exclusion zone around center when measuring noise |
+| `--margin` | 10.0 dB | Threshold margin above noise floor |
+| `--gains` | all | Gain values to test — `all` or comma-separated dB values |
+| `--device` | 0 | Device index or serial string |
+| `--output` | auto | CSV output file (default: `beacon_cal_<timestamp>.csv`) |
+
+Read the recommendation at the bottom of the output — it provides `--gain` and `--threshold` values to plug into `beacon_monitor.py`.
+
 ## Usage
 
-### Generic RTL-SDR monitor
+### Monitor (data collection)
 
 ```bash
 python beacon_monitor.py \
@@ -78,34 +92,6 @@ python beacon_monitor.py \
 | `--gain` | auto | Gain in dB or `auto` |
 | `--ppm` | 1 | PPM correction (Windows LIBUSB workaround) |
 | `--passband-khz` | 5 | ± bandwidth for signal vs noise separation |
-| `--duration` | 0 (forever) | Run time in seconds |
-
-### NooElec NESDR Smart monitor
-
-```bash
-# List connected RTL-SDR devices
-python beacon_monitor_nesdr.py --list-devices
-
-# Run with default device (index 0)
-python beacon_monitor_nesdr.py \
-    --freq 618.245 \
-    --lo 9750.0 \
-    --output beacon_log.csv
-
-# Target a specific unit by serial number
-python beacon_monitor_nesdr.py --device 00000001 --output beacon_log.csv
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--device` | `0` | Device index (int) or serial number string |
-| `--list-devices` | — | Print connected devices and exit |
-| `--freq` | 618.245 MHz | SDR center frequency (IF after LNB) |
-| `--lo` | 9750.0 MHz | LNB LO frequency |
-| `--interval` | 10 s | Sweep interval |
-| `--threshold` | −50.0 dBFS | Detection threshold |
-| `--gain` | auto | Gain in dB (R820T2/R828D steps) or `auto` |
-| `--ppm` | **0** | PPM correction (0 suits TCXO variants; set to 1–2 for standard crystal) |
 | `--duration` | 0 (forever) | Run time in seconds |
 
 R820T2 / R828D gain steps (dB): `0 0.9 1.4 2.7 3.7 7.7 8.7 12.5 14.4 15.7 16.6 19.7 20.7 22.9 25.4 28.0 29.7 32.8 33.8 36.4 37.2 38.6 40.2 42.1 43.4 43.9 44.5 48.0 49.6` — starting point for 10 GHz beacon work is typically 28–38 dB.
@@ -143,26 +129,25 @@ Pass `--phase-filter CARRIER` (or set `NTMS_PHASE_FILTER=CARRIER`) to only uploa
 
 ## CSV Log Format
 
-| Column | Description | NESDR variant |
-|--------|-------------|---------------|
-| `timestamp_utc` | ISO-8601 UTC timestamp of the sweep | both |
-| `beacon_phase` | `Q65`, `CW`, or `CARRIER` | both |
-| `peak_freq_hz` | IF peak frequency (Hz) — reflects LNB drift | both |
-| `peak_power_dbfs` | Signal power at peak (dBFS) | both |
-| `freq_drift_hz` | Hz shift from last `CARRIER` reading (LNB thermal drift proxy) | both |
-| `above_threshold` | `1` if detected, `0` if below threshold | both |
-| `center_freq_hz` | SDR center frequency (Hz) | both |
-| `lo_freq_mhz` | LNB LO (MHz) | both |
-| `rf_freq_hz` | Reconstructed RF = peak IF + LO | both |
-| `gain_db` | Actual SDR gain used (resolved from 'auto') | both |
-| `noise_floor_dbfs` | Median out-of-band power (dBFS) | both |
-| `signal_avg_dbfs` | Mean in-band power (dBFS) | both |
-| `snr_peak_db` | Peak SNR (peak − noise floor) | both |
-| `snr_avg_db` | Average SNR (mean − noise floor) | both |
-| `signal_active_fraction` | Fraction of FFT frames where signal > noise+3dB | both |
-| `integration_s` | Sweep integration time in seconds | both |
-| `passband_hz` | Passband bandwidth used for metrics (Hz) | both |
-| `device_serial` | Serial number of the NESDR Smart unit | NESDR only |
+| Column | Description |
+|--------|-------------|
+| `timestamp_utc` | ISO-8601 UTC timestamp of the sweep |
+| `beacon_phase` | `Q65`, `CW`, or `CARRIER` |
+| `peak_freq_hz` | IF peak frequency (Hz) — reflects LNB drift |
+| `peak_power_dbfs` | Signal power at peak (dBFS) |
+| `freq_drift_hz` | Hz shift from last `CARRIER` reading (LNB thermal drift proxy) |
+| `above_threshold` | `1` if detected, `0` if below threshold |
+| `center_freq_hz` | SDR center frequency (Hz) |
+| `lo_freq_mhz` | LNB LO (MHz) |
+| `rf_freq_hz` | Reconstructed RF = peak IF + LO |
+| `gain_db` | Actual SDR gain used (resolved from 'auto') |
+| `noise_floor_dbfs` | Median out-of-band power (dBFS) |
+| `signal_avg_dbfs` | Mean in-band power (dBFS) |
+| `snr_peak_db` | Peak SNR (peak − noise floor) |
+| `snr_avg_db` | Average SNR (mean − noise floor) |
+| `signal_active_fraction` | Fraction of FFT frames where signal > noise+3dB |
+| `integration_s` | Sweep integration time in seconds |
+| `passband_hz` | Passband bandwidth used for metrics (Hz) |
 
 ## LNB Drift Tracking
 
@@ -171,15 +156,24 @@ Because the beacon is GPS-locked, any sweep-to-sweep shift in `peak_freq_hz` ref
 ## Running Both Scripts Together
 
 ```bash
-# Terminal 1 — collect data (generic RTL-SDR)
+# Terminal 1 — collect data
 python beacon_monitor.py --output beacon_log.csv
 
-# Terminal 1 — collect data (NESDR Smart)
-python beacon_monitor_nesdr.py --output beacon_log.csv
-
-# Terminal 2 — upload data (works with either monitor)
-python beacon_reporter.py --site YOUR-CALLSIGN-10G-CITY
+# Terminal 2 — upload data
+python beacon_reporter.py --monitor-token YOUR_TOKEN --beacon-id YOUR_BEACON_ID
 ```
+
+## Convenience Scripts
+
+Three shell scripts in the repo root provide pre-configured launchers for Raspberry Pi deployments. Edit the variables at the top of each script to match your station, then run directly:
+
+```bash
+bash run_calibrate.sh    # Sweep gain settings, find optimal threshold
+bash run_monitor.sh      # Start data collection
+bash run_reporter.sh     # Start API reporter
+```
+
+These assume the standard Pi deployment paths (`/opt/ntms-beacon/`). On a workstation, run the Python scripts directly instead.
 
 ---
 
@@ -211,10 +205,10 @@ sudo bash pi/install.sh
 The installer will:
 
 1. Install `librtlsdr`, `rtl-sdr`, and `python3-venv` from apt
-2. Blacklist the DVB kernel module so the NESDR Smart is available to librtlsdr
+2. Blacklist the DVB kernel module so the SDR dongle is available to librtlsdr
 3. Create a `ntms-beacon` system user with USB device access
 4. Create `/opt/ntms-beacon/` (scripts + venv) and `/var/lib/ntms-beacon/` (CSV + state)
-5. Install `pyrtlsdr` and `numpy` in an isolated virtualenv
+5. Install dependencies from `requirements.txt` in an isolated virtualenv
 6. Prompt for site-specific values and write systemd drop-in override files
 7. Install and enable `beacon-monitor` and `beacon-reporter` as systemd services
 8. Start both services and print a status summary
@@ -226,8 +220,8 @@ The installer will:
 Both services start on boot and restart automatically if they crash:
 
 ```
-beacon-monitor.service  →  beacon_monitor_nesdr.py  (sweeps every 10 s, writes CSV)
-beacon-reporter.service →  beacon_reporter.py        (tails CSV, POSTs to NTMS API)
+beacon-monitor.service  →  beacon_monitor.py   (sweeps every 10 s, writes CSV)
+beacon-reporter.service →  beacon_reporter.py   (tails CSV, POSTs to NTMS API)
 ```
 
 ### Useful commands on the Pi
@@ -243,7 +237,7 @@ sudo systemctl status beacon-monitor beacon-reporter
 sudo systemctl restart beacon-monitor beacon-reporter
 
 # List connected SDR devices
-/opt/ntms-beacon/venv/bin/python3 /opt/ntms-beacon/beacon_monitor_nesdr.py --list-devices
+/opt/ntms-beacon/venv/bin/python3 /opt/ntms-beacon/beacon_monitor.py --list-devices
 ```
 
 ### Reconfiguring a station
@@ -285,15 +279,6 @@ Key environment variables:
 | `BEACON_PPM` | PPM correction (default: 0 for TCXO, 1–2 for crystal) |
 
 Or re-run the installer — it detects the existing config and asks before overwriting it.
-
-### Pi-specific notes vs Windows
-
-| Topic | Windows | Raspberry Pi |
-|-------|---------|--------------|
-| Driver install | Zadig (WinUSB replacement) | Not needed — librtlsdr is a native apt package |
-| DVB module conflict | Not applicable | Must blacklist `dvb_usb_rtl28xxu` (installer does this) |
-| `ppm=0` bug | Yes — triggers LIBUSB_ERROR_INVALID_PARAM | Not present on Linux |
-| Autostart | Task Scheduler (manual) | systemd (handled by installer) |
 
 ## License
 
