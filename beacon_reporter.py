@@ -9,6 +9,9 @@ or started automatically. Tracks its position in the CSV so it never sends
 the same row twice, survives restarts (position is saved to a state file),
 and retries failed POSTs with exponential backoff.
 
+CSV fields like gridsquare and beacon_phase are read from the CSV rows
+and included in API payloads automatically.
+
 Usage:
   python beacon_reporter.py [options]
 
@@ -26,6 +29,7 @@ Environment variables (override defaults, overridden by CLI args):
   NTMS_API_URL         API endpoint
   NTMS_MONITOR_TOKEN   Monitor token / bearer token
   NTMS_BEACON_ID       Beacon UUID string
+  NTMS_GRIDSQUARE      Maidenhead gridsquare (read from CSV row)
   NTMS_PHASE_FILTER    Phase filter (e.g. CARRIER)
   NTMS_PASSBAND_HZ     Passband in Hz fallback
 
@@ -173,12 +177,16 @@ def build_payload(row: dict, beacon_id: str, passband_hz_default: float,
     """
     Convert a CSV row into the NTMS Prop API measurement payload.
 
+    The gridsquare field is the RECEIVER's location (where the SDR hardware
+    is physically located), NOT the beacon/transmitter's location.
+
     All numeric fields use safe defaults when the CSV column is missing,
     which maintains compatibility with logs produced by older monitor versions.
     """
     peak_power = float(row.get("peak_power_dbfs", -999))
     return {
         "beacon_id"             : beacon_id,
+        "gridsquare"            : row.get("gridsquare", ""),  # RECEIVER location, not the beacon
         "frequency_hz"          : int(float(row["center_freq_hz"])),
         "measured_at"           : row.get("timestamp_utc", ""),
         "integration_s"         : int(float(row.get("integration_s", 60))),
@@ -321,6 +329,22 @@ def run_reporter(args) -> None:
     if phase_filter:
         print(f"  Phase flt : {phase_filter}")
     print()
+
+    # --- Warn if the CSV doesn't have a gridsquare column ---
+    if os.path.isfile(args.input):
+        try:
+            with open(args.input, newline="") as f:
+                header_line = f.readline()
+                if header_line:
+                    header_fields = next(csv.reader([header_line]))
+                    if "gridsquare" not in header_fields:
+                        print("  WARNING: CSV file does not contain a 'gridsquare' column.")
+                        print("    Older monitor versions may not write gridsquare to the CSV.")
+                        print("    Update your monitor or set GRIDSQUARE in beacon_config.py.")
+                        print("    Submissions will proceed without receiver location data.")
+                        print()
+        except Exception:
+            pass   # CSV not yet created or unreadable — no warning needed
 
     state = load_state(args.state)
     print(f"  Resuming from offset {state['file_offset']}, "

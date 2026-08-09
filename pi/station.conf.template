@@ -51,5 +51,5 @@ BEACON_PPM=0                     # 0 for TCXO variants (Smart XTR, Smart v5)
                                  # 1 or 2 for standard-crystal NESDR Smart
 
 # ---- Timing ---------------------------------------------------------------
-BEACON_INTERVAL_S=10             # Sweep interval in seconds
+BEACON_INTERVAL_S=300            # Sweep interval in seconds (e.g., 300 = 5 minutes)
 BEACON_CW_END_S=10               # Seconds into odd minute where CW ends / carrier begins

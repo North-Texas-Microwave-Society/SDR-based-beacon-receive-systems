@@ -12,7 +12,7 @@ WorkingDirectory=/var/lib/ntms-beacon
 Environment=NTMS_INPUT=/var/lib/ntms-beacon/beacon_log.csv
 Environment=NTMS_MONITOR_TOKEN=your_monitor_key_here
 Environment=NTMS_BEACON_ID=your_beacon_uuid_here
-Environment=NTMS_GRIDSQUARE=your_gridsquare_here
+Environment=NTMS_GRIDSQUARE=
 Environment=NTMS_ANTENNA_HEIGHT_FT=
 Environment=NTMS_API_URL=https://prop.w5isp.com/api/v1/beacon-monitor/measurements
 Environment=NTMS_PHASE_FILTER=CARRIER

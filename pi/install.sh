@@ -173,7 +173,7 @@ if [[ "$RECONFIGURE" == "true" ]]; then
     THRESHOLD=$(ask      "Detection threshold dBFS"                   "-50.0")
     GAIN=$(ask           "SDR gain (dB or 'auto')"                    "auto")
     PPM=$(ask            "PPM correction (0=TCXO, 1-2=crystal)"      "0")
-    INTERVAL=$(ask       "Sweep interval seconds"                     "10")
+    INTERVAL=$(ask       "Sweep interval seconds (300 = 5 minutes)" "300")
     DEVICE=$(ask         "Device index or serial"                     "0")
 
     echo

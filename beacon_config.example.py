@@ -14,7 +14,7 @@ SDR_GAIN = "auto"             # gain in dB or "auto"
 SDR_FFT_SIZE = 2048           # FFT bins
 
 # --- Sweep ---
-SWEEP_INTERVAL_S = 10         # seconds between sweeps
+SWEEP_INTERVAL_S = 300        # seconds between sweeps (e.g., 300 = 5 minutes)
 SWEEP_DURATION_S = 0          # 0 = run forever
 CW_END_S = 10                 # seconds into odd minute where CW ends
 MAX_SIGNALS = 1               # peaks per sweep (1-5)
@@ -28,7 +28,9 @@ THRESHOLD_DBFS = -50.0        # detection threshold
 CSV_PATH = "beacon_log.csv"   # CSV output path
 
 # --- Site ---
-LOCATION = "UNKNOWN"          # site identifier for CSV tagging
+GRIDSQUARE = ""               # Maidenhead grid square of your RECEIVER location (e.g. "EM12il"), up to 20 chars.
+                               # WARNING: Leave empty and measurements submit without receiver location.
+                               # Fix by setting the grid square where your SDR hardware is physically located.
 
 # --- API reporting (monitor --report) ---
 API_URL = "https://prop.w5isp.com/api/v1/beacon-monitor/measurements"
@@ -45,6 +47,6 @@ CAL_MARGIN_DB = 10.0          # threshold margin above noise floor
 CAL_GAINS = "all"             # gain values to test, or "all" for full R820T2 sweep
 
 # --- Standalone reporter ---
-REPORTER_POLL_S = 5           # poll interval
+REPORTER_POLL_S = 5           # seconds between CSV poll checks
 REPORTER_STATE_PATH = "beacon_reporter_state.json"
 REPORTER_VERSION = "2.0.0"

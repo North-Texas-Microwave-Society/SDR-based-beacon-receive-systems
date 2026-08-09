@@ -32,13 +32,13 @@ Multi-signal detection:
   If no signals exceed threshold, one row is still written with
   signal_rank=1, above_threshold=0 to record the noise floor measurement.
 
-Location tagging:
-  --location string is written to every CSV row for field session tracking.
-  Use grid square, site name, or both: e.g. "EM12IL-BURLESON-TOWER"
+Gridsquare tagging:
+  --gridsquare Maidenhead grid square of the RECEIVER location (up to 20 chars)
+  written to every CSV row and included in API payloads for receiver identification.
 
 Output:
   - CSV log: one row per detected signal per sweep (long format)
-  - Columns: timestamp_utc, location, beacon_phase, signal_rank,
+  - Columns: timestamp_utc, gridsquare, beacon_phase, signal_rank,
              peak_freq_hz, peak_power_dbfs, freq_drift_hz, freq_sep_hz,
              above_threshold, center_freq_hz, lo_freq_mhz, rf_freq_hz
   - freq_sep_hz: frequency difference rank1 minus rank2 (Hz), rank-1 row only,
@@ -58,7 +58,7 @@ Usage:
   --ppm          PPM correction                     (default: 1)
   --cw-end       Seconds into odd minute where CW ends (default: 10)
   --max-signals  Max signals to detect per sweep    (default: 1, max: 5)
-  --location     Site identifier string             (default: UNKNOWN)
+   --gridsquare   Maidenhead grid square of the RECEIVER location (up to 20 chars)
 """
 
 import argparse
@@ -93,7 +93,7 @@ DEFAULT_FFT_SIZE      = 2048
 DEFAULT_OUTPUT        = "beacon_log.csv"
 DEFAULT_CW_END_S      = 10        # seconds into odd minute where CW ends
 DEFAULT_MAX_SIGNALS   = 1
-DEFAULT_LOCATION      = "UNKNOWN"
+DEFAULT_GRIDSQUARE     = ""
 DEFAULT_SPAN_KHZ      = 2000       # analysis span in kHz (default = full 2 MHz capture)
 DEFAULT_PASSBAND_KHZ   = 5         # ± bandwidth for signal vs noise separation (kHz)
 DEFAULT_API_URL        = "https://prop.w5isp.com/api/v1/beacon-monitor/measurements"
@@ -103,7 +103,7 @@ DEFAULT_DEVICE        = 0
 SAMPLE_RATE_HZ        = 2_048_000  # 2.048 MSPS -- fits +/-1 MHz easily
 SUPPRESS_HZ           = 5_000      # peak suppression window (+/-5 kHz)
 CSV_FIELDS            = [
-    "timestamp_utc", "location", "beacon_phase", "signal_rank",
+    "timestamp_utc", "gridsquare", "beacon_phase", "signal_rank",
     "peak_freq_hz", "peak_power_dbfs", "freq_drift_hz", "freq_sep_hz",
     "above_threshold", "center_freq_hz", "lo_freq_mhz", "rf_freq_hz",
     "gain_db", "noise_floor_dbfs", "signal_avg_dbfs", "snr_peak_db",
@@ -470,6 +470,7 @@ def build_report_payload(row: dict, beacon_id: str,
     peak_power = float(row.get("peak_power_dbfs", -999))
     return {
         "beacon_id"             : beacon_id,
+        "gridsquare"            : (row.get("gridsquare", "") or "").strip(),
         "frequency_hz"          : int(float(row.get("center_freq_hz", 0))),
         "measured_at"           : row.get("timestamp_utc", ""),
         "integration_s"         : int(float(row.get("integration_s", 60))),
@@ -536,7 +537,7 @@ def run_monitor(args) -> None:
     duration    = args.duration
     cw_end_s    = args.cw_end
     max_signals = args.max_signals
-    location    = args.location
+    gridsquare  = args.gridsquare
     span_hz     = args.span_khz * 1000
     passband_hz = int(args.passband_khz * 1000)
 
@@ -554,7 +555,7 @@ def run_monitor(args) -> None:
     print(f"  Max signals   : {max_signals}")
     print(f"  Suppress win  : +/-{SUPPRESS_HZ/1e3:.0f} kHz around each peak")
     print(f"  CW/carrier    : CW ends at +{cw_end_s}s into odd minute")
-    print(f"  Location      : {location}")
+    print(f"  Gridsquare    : {gridsquare}")
     print(f"  Samples/sweep : {n_samples:,}")
     print(f"  Output file   : {output_path}")
     print(f"  Duration      : {'forever' if duration == 0 else f'{duration}s'}")
@@ -566,6 +567,18 @@ def run_monitor(args) -> None:
         print(f"  Phase filter  : {args.phase_filter or '(none — uploading all phases)'}")
         if args.dry_run:
             print("  Dry run       : YES (no data sent)")
+        gs = gridsquare.strip() if gridsquare else ""
+        if not gs:
+            print()
+            print("  WARNING: No receiver gridsquare set. Measurements will be submitted without receiver location.")
+            print('    Fix: Set GRIDSQUARE in beacon_config.py or pass --gridsquare "EM12il"')
+            print("    This should be the grid square where your SDR receiver is physically located.")
+        elif len(gs) < 4:
+            print()
+            print(f"  WARNING: Receiver gridsquare '{gs}' is shorter than 4 characters — is this correct?")
+        elif len(gs) > 20:
+            print()
+            print(f"  WARNING: Receiver gridsquare '{gs}' exceeds 20 characters. It will be truncated by the API.")
     print()
 
     init_csv(output_path)
@@ -657,7 +670,7 @@ def run_monitor(args) -> None:
 
                 csv_rows.append({
                     "timestamp_utc"        : utc_now,
-                    "location"             : location,
+                    "gridsquare"           : gridsquare,
                     "beacon_phase"         : phase,
                     "signal_rank"          : rank,
                     "peak_freq_hz"         : f"{peak_freq_hz:.0f}",
@@ -784,9 +797,9 @@ def parse_args():
                    default=int(c("MAX_SIGNALS", "BEACON_MAX_SIGNALS", DEFAULT_MAX_SIGNALS)),
                    dest="max_signals",
                    help=f"Max signals to detect per sweep, 1-5 (default: {DEFAULT_MAX_SIGNALS})")
-    p.add_argument("--location", type=str,
-                   default=str(c("LOCATION", "BEACON_LOCATION", DEFAULT_LOCATION)),
-                   help=f"Site identifier for CSV tagging (default: {DEFAULT_LOCATION})")
+    p.add_argument("--gridsquare", type=str,
+                   default=str(c("GRIDSQUARE", "NTMS_GRIDSQUARE", DEFAULT_GRIDSQUARE)),
+                   help="Maidenhead grid square of the RECEIVER location (up to 20 chars)")
     p.add_argument("--span", type=float,
                    default=float(c("SPAN_KHZ", "BEACON_SPAN_KHZ", DEFAULT_SPAN_KHZ)),
                    dest="span_khz",
