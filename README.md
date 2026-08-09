@@ -91,12 +91,17 @@ Then edit `beacon_config.py` and set the values for your station. Every script a
 
 ### After editing
 
-Run the calibrator to find your optimal gain and threshold, then start monitoring:
+With `REPORT = True` and a valid `GRIDSQUARE` set, `beacon_monitor.py` handles everything — collecting, CSV logging, and uploading to the NTMS API — all in one process:
 
 ```bash
-python beacon_calibrate.py          # find gain + threshold
-python beacon_monitor.py            # start collecting + uploading
+# First-time setup only — find optimal gain and threshold for your LNB-SDR system
+python beacon_calibrate.py
+
+# Start monitoring — this is the only command you run day-to-day
+python beacon_monitor.py
 ```
+
+`beacon_reporter.py` is a separate, optional tool for advanced setups that want to run collection and uploading in different processes (see [Running](#running)).
 
 ## Station Calibration
 
