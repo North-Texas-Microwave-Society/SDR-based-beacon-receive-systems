@@ -402,11 +402,13 @@ class DriftTracker:
 
         Returns drift_hz (int) or None if no prior CARRIER reading exists.
         """
+        if phase != "CARRIER":
+            return None
+
         drift = None
         if self._last_carrier_freq_hz is not None:
-            drift = int(round(peak_freq_hz - self._last_carrier_freq_hz))
-        if phase == "CARRIER":
-            self._last_carrier_freq_hz = peak_freq_hz
+            drift = round(peak_freq_hz - self._last_carrier_freq_hz)
+        self._last_carrier_freq_hz = peak_freq_hz
         return drift
 
 
@@ -563,7 +565,7 @@ def run_monitor(args) -> None:
         print(f"  API endpoint  : {args.api_url}")
         print(f"  Phase filter  : {args.phase_filter or '(none — uploading all phases)'}")
         if args.dry_run:
-            print(f"  Dry run       : YES (no data sent)")
+            print("  Dry run       : YES (no data sent)")
     print()
 
     init_csv(output_path)
@@ -627,7 +629,7 @@ def run_monitor(args) -> None:
             # Frequency separation between rank-1 and rank-2 (only when max_signals==2)
             freq_sep_hz = None
             if max_signals == 2 and len(peaks) == 2:
-                freq_sep_hz = int(round(peaks[0][0] - peaks[1][0]))
+                freq_sep_hz = round(peaks[0][0] - peaks[1][0])
 
             for rank, (peak_freq_hz, peak_power) in enumerate(peaks, start=1):
                 metric_idx = rank - 1
@@ -820,9 +822,9 @@ if __name__ == "__main__":
         sys.exit(0)
     if isinstance(args.device, str) and args.device.lstrip("-").isdigit():
         args.device = int(args.device)
-    if args.report and not args.dry_run:
-        if not args.monitor_token or not args.beacon_id:
-            print("ERROR: --report requires --monitor-token and --beacon-id "
-                  "(set them in beacon_config.py or via env vars)")
-            sys.exit(1)
+    if (args.report and not args.dry_run
+            and (not args.monitor_token or not args.beacon_id)):
+        print("ERROR: --report requires --monitor-token and --beacon-id "
+              "(set them in beacon_config.py or via env vars)")
+        sys.exit(1)
     run_monitor(args)

@@ -36,14 +36,13 @@ Example:
 """
 
 import argparse
+import csv
 import json
 import os
 import sys
 import time
-import csv
-import urllib.request
 import urllib.error
-
+import urllib.request
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -133,26 +132,34 @@ def read_new_rows(csv_path: str, offset: int) -> tuple[list[dict], int]:
         if not header_line:
             return [], offset
 
-        fieldnames = [h.strip() for h in header_line.strip().split(",")]
+        fieldnames = next(csv.reader([header_line]))
+        header_offset = f.tell()
 
-        # If we've never read past the header, start at end of header line
-        if offset == 0:
-            offset = f.tell()
+        # A smaller/replaced file invalidates the persisted position. Restart
+        # after its header instead of seeking beyond EOF forever.
+        f.seek(0, os.SEEK_END)
+        file_end = f.tell()
+        if offset < header_offset or offset > file_end:
+            offset = header_offset
 
-        # Seek to where we left off
-        if offset > f.tell():
-            f.seek(offset)
-        else:
-            f.seek(offset)
-
-        reader = csv.DictReader(f, fieldnames=fieldnames)
-        for row in reader:
+        f.seek(offset)
+        new_offset = offset
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            # The monitor and reporter are separate processes. Do not consume
+            # a row until the writer has completed it with a newline.
+            if not line.endswith(("\n", "\r")):
+                break
+            values = next(csv.reader([line]))
+            row = dict(zip(fieldnames, values))
             # Skip blank lines
             if not any(row.values()):
+                new_offset = f.tell()
                 continue
-            rows.append(dict(row))
-
-        new_offset = f.tell()
+            rows.append(row)
+            new_offset = f.tell()
 
     return rows, new_offset
 
@@ -304,7 +311,7 @@ def run_reporter(args) -> None:
     passband_hz_default = args.passband_hz
     version            = args.propmonitor_version
 
-    print(f"NTMS Beacon Reporter")
+    print("NTMS Beacon Reporter")
     print(f"  Watching  : {args.input}")
     print(f"  API URL   : {api_url}")
     print(f"  Beacon ID : {beacon_id}")
@@ -395,8 +402,11 @@ def parse_args():
     p.add_argument("--phase-filter",
                    default=str(c("PHASE_FILTER", "NTMS_PHASE_FILTER", "")),
                    help="Only upload rows matching this beacon_phase (e.g. CARRIER)")
+    passband_hz = c("PASSBAND_HZ", "NTMS_PASSBAND_HZ", None)
+    if passband_hz is None:
+        passband_hz = float(c("PASSBAND_KHZ", "", DEFAULT_PASSBAND_HZ / 1000)) * 1000
     p.add_argument("--passband-hz", type=float,
-                   default=float(c("PASSBAND_KHZ", "NTMS_PASSBAND_HZ", DEFAULT_PASSBAND_HZ)),
+                   default=float(passband_hz),
                    help=f"Passband in Hz, fallback if CSV lacks field (default: {DEFAULT_PASSBAND_HZ})")
     p.add_argument("--version", type=str,
                    default=str(c("REPORTER_VERSION", "", "2.0.0")),
