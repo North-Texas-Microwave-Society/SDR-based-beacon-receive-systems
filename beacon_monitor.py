@@ -570,9 +570,10 @@ def run_monitor(args) -> None:
         gs = gridsquare.strip() if gridsquare else ""
         if not gs:
             print()
-            print("  WARNING: No receiver gridsquare set. Measurements will be submitted without receiver location.")
+            print("  ERROR: No receiver gridsquare set. Reporting is disabled without receiver location.")
             print('    Fix: Set GRIDSQUARE in beacon_config.py or pass --gridsquare "EM12il"')
-            print("    This should be the grid square where your SDR receiver is physically located.")
+            print("    This must be the grid square where your SDR receiver is physically located.")
+            sys.exit(1)
         elif len(gs) < 4:
             print()
             print(f"  WARNING: Receiver gridsquare '{gs}' is shorter than 4 characters — is this correct?")

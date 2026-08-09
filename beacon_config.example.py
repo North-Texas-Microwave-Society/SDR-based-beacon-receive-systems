@@ -28,9 +28,9 @@ THRESHOLD_DBFS = -50.0        # detection threshold
 CSV_PATH = "beacon_log.csv"   # CSV output path
 
 # --- Site ---
-GRIDSQUARE = ""               # Maidenhead grid square of your RECEIVER location (e.g. "EM12il"), up to 20 chars.
-                               # WARNING: Leave empty and measurements submit without receiver location.
-                               # Fix by setting the grid square where your SDR hardware is physically located.
+GRIDSQUARE = ""               # REQUIRED — Maidenhead grid square of your RECEIVER location.
+                                # Must be set to where your SDR hardware is physically located.
+                                # Example: "EM12il" (up to 20 chars). Reporting is disabled without it.
 
 # --- API reporting (monitor --report) ---
 API_URL = "https://prop.w5isp.com/api/v1/beacon-monitor/measurements"

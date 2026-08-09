@@ -330,7 +330,7 @@ def run_reporter(args) -> None:
         print(f"  Phase flt : {phase_filter}")
     print()
 
-    # --- Warn if the CSV doesn't have a gridsquare column ---
+    # --- Reject if the CSV doesn't have a gridsquare column ---
     if os.path.isfile(args.input):
         try:
             with open(args.input, newline="") as f:
@@ -338,11 +338,11 @@ def run_reporter(args) -> None:
                 if header_line:
                     header_fields = next(csv.reader([header_line]))
                     if "gridsquare" not in header_fields:
-                        print("  WARNING: CSV file does not contain a 'gridsquare' column.")
-                        print("    Older monitor versions may not write gridsquare to the CSV.")
-                        print("    Update your monitor or set GRIDSQUARE in beacon_config.py.")
-                        print("    Submissions will proceed without receiver location data.")
-                        print()
+                        print("  ERROR: CSV file does not contain a 'gridsquare' column.")
+                        print("    Data without receiver location is not accepted.")
+                        print("    Update your monitor to a version that writes gridsquare to the CSV,")
+                        print("    or set GRIDSQUARE in beacon_config.py.")
+                        sys.exit(1)
         except Exception:
             pass   # CSV not yet created or unreadable — no warning needed
 
@@ -359,6 +359,12 @@ def run_reporter(args) -> None:
                 for row in rows:
                     # --- Phase filter ---
                     if phase_filter and row.get("beacon_phase", "") != phase_filter:
+                        continue
+
+                    # --- Require receiver gridsquare ---
+                    row_gs = (row.get("gridsquare", "") or "").strip()
+                    if not row_gs:
+                        print(f"  SKIPPED: Row at {row.get('timestamp_utc', '?')} has no receiver gridsquare — not submitted.")
                         continue
 
                     ts = row.get("timestamp_utc", "?")
