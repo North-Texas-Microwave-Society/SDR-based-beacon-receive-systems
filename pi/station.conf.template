@@ -2,14 +2,17 @@
 # -----------------------------------
 # Copy this file to /opt/ntms-beacon/station.conf and fill in your values.
 # Permissions must be 640 (owner root, group ntms-beacon) since this file
-# contains the API key:
+# contains the monitor token:
 #   sudo chmod 640 /opt/ntms-beacon/station.conf
 #   sudo chown root:ntms-beacon /opt/ntms-beacon/station.conf
 
-# ---- Station identity (required by beacon_reporter.py) --------------------
-NTMS_SITE_ID=CALLSIGN-10G-CITY          # e.g. KM5PO-10G-BURLESON
-NTMS_API_URL=https://api.ntms.org/beacon/observation
-NTMS_API_KEY=your_api_key_here
+# ---- API credentials (from your monitor setup page on prop.w5isp.com) ----
+NTMS_MONITOR_TOKEN=your_monitor_key_here
+NTMS_BEACON_ID=your_beacon_uuid_here
+NTMS_API_URL=https://prop.w5isp.com/api/v1/beacon-monitor/measurements
+
+# ---- Optional ----
+NTMS_PHASE_FILTER=CARRIER
 
 # ---- CSV file shared between monitor and reporter -------------------------
 BEACON_OUTPUT=/var/lib/ntms-beacon/beacon_log.csv
@@ -20,10 +23,11 @@ BEACON_FREQ_MHZ=618.245        # IF center (10368.370 - 9750.000 = 618.370;
                                #   adjust to match your LNB's actual offset)
 BEACON_LO_MHZ=9750.0           # Bullseye LNB low-band LO (no 22 kHz tone)
 BEACON_THRESHOLD_DBFS=-50.0    # dBFS level to flag as "detected"
+BEACON_PASSBAND_KHZ=5          # ± bandwidth in kHz for signal vs noise separation
 
 # ---- SDR device settings --------------------------------------------------
 BEACON_DEVICE=0                # Device index (0) or serial string (e.g. 00000001)
-                               #   Run: python3 beacon_monitor_nesdr.py --list-devices
+                               #   Run: python3 beacon_monitor.py --list-devices
 BEACON_GAIN=auto               # 'auto' or an R820T2 gain step in dB (28.0–38.0
                                #   is a good starting range for 10 GHz work)
 BEACON_PPM=0                   # 0 for TCXO variants (Smart XTR, Smart v5)

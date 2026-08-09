@@ -77,6 +77,7 @@ python beacon_monitor.py \
 | `--threshold` | −50.0 dBFS | Detection threshold |
 | `--gain` | auto | Gain in dB or `auto` |
 | `--ppm` | 1 | PPM correction (Windows LIBUSB workaround) |
+| `--passband-khz` | 5 | ± bandwidth for signal vs noise separation |
 | `--duration` | 0 (forever) | Run time in seconds |
 
 ### NooElec NESDR Smart monitor
@@ -113,21 +114,32 @@ R820T2 / R828D gain steps (dB): `0 0.9 1.4 2.7 3.7 7.7 8.7 12.5 14.4 15.7 16.6 1
 
 ```bash
 python beacon_reporter.py \
-    --api  https://api.ntms.org/beacon/observation \
-    --key  YOUR_API_KEY \
-    --site KM5PO-10G-BURLESON
+    --monitor-token  YOUR_MONITOR_TOKEN \
+    --beacon-id      550e8400-e29b-41d4-a716-446655440000 \
+    --phase-filter   CARRIER
 ```
 
 Credentials can also be supplied via environment variables:
 
 ```bash
-export NTMS_API_URL=https://api.ntms.org/beacon/observation
-export NTMS_API_KEY=YOUR_API_KEY
-export NTMS_SITE_ID=KM5PO-10G-BURLESON
+export NTMS_API_URL=https://prop.w5isp.com/api/v1/beacon-monitor/measurements
+export NTMS_MONITOR_TOKEN=YOUR_MONITOR_TOKEN
+export NTMS_BEACON_ID=your_beacon_uuid_here
+export NTMS_PHASE_FILTER=CARRIER
 python beacon_reporter.py
 ```
 
 Use `--dry-run` to verify operation without sending real data.
+Pass `--phase-filter CARRIER` (or set `NTMS_PHASE_FILTER=CARRIER`) to only upload steady-carrier rows — the best data for propagation analysis.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--monitor-token` | (required) | Monitor token from your prop.w5isp.com setup page |
+| `--beacon-id` | (required) | Beacon UUID string |
+| `--phase-filter` | (none) | Only upload rows matching this `beacon_phase` (e.g. `CARRIER`) |
+| `--passband-hz` | 5000 | Passband in Hz, fallback if CSV lacks the field |
+| `--version` | 2.0.0 | PropMonitor version reported in payload |
+| `--poll` | 5 s | Poll interval for new CSV rows |
 
 ## CSV Log Format
 
@@ -142,6 +154,14 @@ Use `--dry-run` to verify operation without sending real data.
 | `center_freq_hz` | SDR center frequency (Hz) | both |
 | `lo_freq_mhz` | LNB LO (MHz) | both |
 | `rf_freq_hz` | Reconstructed RF = peak IF + LO | both |
+| `gain_db` | Actual SDR gain used (resolved from 'auto') | both |
+| `noise_floor_dbfs` | Median out-of-band power (dBFS) | both |
+| `signal_avg_dbfs` | Mean in-band power (dBFS) | both |
+| `snr_peak_db` | Peak SNR (peak − noise floor) | both |
+| `snr_avg_db` | Average SNR (mean − noise floor) | both |
+| `signal_active_fraction` | Fraction of FFT frames where signal > noise+3dB | both |
+| `integration_s` | Sweep integration time in seconds | both |
+| `passband_hz` | Passband bandwidth used for metrics (Hz) | both |
 | `device_serial` | Serial number of the NESDR Smart unit | NESDR only |
 
 ## LNB Drift Tracking
@@ -234,6 +254,16 @@ Edit `/opt/ntms-beacon/station.conf` directly, then restart:
 sudo nano /opt/ntms-beacon/station.conf
 sudo systemctl restart beacon-monitor beacon-reporter
 ```
+
+Key settings in `station.conf`:
+
+| Key | Description |
+|-----|-------------|
+| `NTMS_MONITOR_TOKEN` | Monitor token from prop.w5isp.com |
+| `NTMS_BEACON_ID` | Beacon UUID string |
+| `NTMS_API_URL` | API endpoint (default: `https://prop.w5isp.com/api/v1/beacon-monitor/measurements`) |
+| `NTMS_PHASE_FILTER` | Only upload rows matching this phase (e.g. `CARRIER`) |
+| `BEACON_PASSBAND_KHZ` | ± bandwidth in kHz for signal vs noise separation (default: 5) |
 
 Or re-run the installer — it detects the existing config and asks before overwriting it.
 
