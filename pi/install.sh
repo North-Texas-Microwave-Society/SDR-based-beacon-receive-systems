@@ -121,14 +121,28 @@ info "Scripts copied to ${INSTALL_DIR}."
 # ---------------------------------------------------------------------------
 echo
 echo "--- Setting up Python virtual environment ---"
-if [[ ! -d "${VENV}" ]]; then
-    python3 -m venv "${VENV}"
-    info "Created virtualenv at ${VENV}."
-else
-    info "Virtualenv already exists — updating packages."
+
+# 32-bit Pi OS (armv7l) has no numpy wheels on PyPI — piwheels provides them.
+# pip on Raspberry Pi OS is preconfigured for piwheels; uv needs to be told.
+if [[ "$(uname -m)" == armv* ]]; then
+    export UV_EXTRA_INDEX_URL="${UV_EXTRA_INDEX_URL:-https://www.piwheels.org/simple}"
 fi
-"${VENV}/bin/pip" install --quiet --upgrade pip
-"${VENV}/bin/pip" install --quiet --upgrade pyrtlsdr numpy
+
+if command -v uv >/dev/null 2>&1; then
+    UV="$(command -v uv)"
+    "${UV}" venv --quiet "${VENV}"
+    "${UV}" pip install --quiet --python "${VENV}/bin/python" --upgrade pyrtlsdr numpy
+    info "Virtualenv at ${VENV} built with uv."
+else
+    if [[ ! -d "${VENV}" ]]; then
+        python3 -m venv "${VENV}"
+        info "Created virtualenv at ${VENV}."
+    else
+        info "Virtualenv already exists — updating packages."
+    fi
+    "${VENV}/bin/pip" install --quiet --upgrade pip
+    "${VENV}/bin/pip" install --quiet --upgrade pyrtlsdr numpy
+fi
 chown -R root:root "${VENV}"
 info "pyrtlsdr and numpy installed."
 

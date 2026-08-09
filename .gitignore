@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# uv
+.uv-cache/
+
+# Beacon output
+beacon_log.csv
+beacon_cal_*.csv
+
+# Station secrets
+station.conf
+
+# OS
+.DS_Store
+Thumbs.db

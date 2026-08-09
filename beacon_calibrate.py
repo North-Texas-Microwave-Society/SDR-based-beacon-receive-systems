@@ -1,4 +1,16 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "numpy>=1.21",
+#     "pyrtlsdr>=0.3.0",
+#     # Prebuilt librtlsdr binaries, so no system package is needed on the
+#     # common platforms. pyrtlsdr loads this before searching the system for
+#     # librtlsdr, and the marker skips architectures with no wheel (notably
+#     # 32-bit Raspberry Pi OS), which fall back to the system library.
+#     "pyrtlsdrlib>=0.0.5; platform_machine in 'x86_64 AMD64 aarch64 arm64 x86'",
+# ]
+# ///
 """
 NTMS 10 GHz Beacon Station Calibrator
 ======================================
@@ -42,11 +54,41 @@ import time
 
 import numpy as np
 
+def _add_local_dll_dir() -> None:
+    """Let setup.ps1's lib\\ directory satisfy the librtlsdr load on Windows.
+
+    Python 3.8+ no longer searches PATH for native DLL dependencies, so the
+    directory has to be registered explicitly before pyrtlsdr loads it.
+    No-op everywhere else.
+    """
+    if sys.platform != "win32":
+        return
+    lib_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
+    if os.path.isdir(lib_dir):
+        os.add_dll_directory(lib_dir)
+        os.environ["PATH"] = lib_dir + os.pathsep + os.environ.get("PATH", "")
+
+
+_add_local_dll_dir()
+
 try:
     from rtlsdr import RtlSdr
-except ImportError:
-    print("ERROR: pyrtlsdr not installed.")
-    print("  Install with:  pip install pyrtlsdr")
+except ImportError as exc:
+    if isinstance(exc, ModuleNotFoundError) and (exc.name or "").split(".")[0] == "rtlsdr":
+        print("ERROR: the pyrtlsdr package is not installed.")
+        print("  Run this script with uv and it installs its own dependencies:")
+        print("    uv run beacon_calibrate.py")
+        print("  Or install manually:  pip install pyrtlsdr numpy")
+    else:
+        # pyrtlsdr imported but could not load the native library behind it.
+        print(f"ERROR: {exc}")
+        print("  pyrtlsdr is installed, but the native librtlsdr library was not found.")
+        print("  Raspberry Pi OS / Debian / Ubuntu:  sudo apt install librtlsdr-dev rtl-sdr")
+        print("  macOS:                              brew install librtlsdr")
+        print("  Windows: download the DLLs from")
+        print("             https://github.com/librtlsdr/librtlsdr/releases")
+        print("           put them on PATH (or beside this script), then run Zadig")
+        print("           to install the WinUSB driver for the dongle.")
     sys.exit(1)
 
 # All valid R820T2 / R828D gain steps in dB

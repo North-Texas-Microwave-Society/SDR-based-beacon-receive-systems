@@ -8,15 +8,15 @@ This project provides three Python scripts that together form a complete beacon 
 
 | Script | Hardware | Purpose |
 |--------|----------|---------|
-| `beacon_monitor.py` | RTL-SDR Blog V3 (or any RTL2832U dongle) | Capture, FFT analysis, phase detection, CSV logging |
-| `beacon_monitor_nesdr.py` | NooElec NESDR Smart / Smart XTR / Smart v5 | Same pipeline with NESDR device enumeration, serial tracking, and TCXO-optimized PPM defaults |
+| `beacon_monitor.py` | Any RTL2832U dongle — RTL-SDR Blog V3, NooElec NESDR Smart, etc. | Capture, FFT analysis, phase detection, device enumeration, CSV logging |
+| `beacon_calibrate.py` | same | Cold-sky gain sweep to find the best gain and detection threshold |
 | `beacon_reporter.py` | (hardware-agnostic) | Tail CSV log, POST observations to NTMS API with retry/backoff |
 
-Both monitor scripts produce the same CSV format and feed the same reporter.
+All three run on Linux, Raspberry Pi, macOS, and Windows via `uv run` — see [Installation](#installation).
 
 ## Hardware
 
-### Generic RTL-SDR (beacon_monitor.py)
+### Generic RTL-SDR
 
 | Component | Details |
 |-----------|---------|
@@ -25,7 +25,7 @@ Both monitor scripts produce the same CSV format and feed the same reporter.
 | Beacon frequency | 10368.370 MHz → 618.370 MHz IF |
 | Capture bandwidth | ±1 MHz (no retuning needed) |
 
-### NooElec NESDR Smart (beacon_monitor_nesdr.py)
+### NooElec NESDR Smart
 
 | Variant | Tuner | Oscillator | PPM |
 |---------|-------|------------|-----|
@@ -34,7 +34,7 @@ Both monitor scripts produce the same CSV format and feed the same reporter.
 | NESDR Smart v5 | R828D | TCXO | **0** (default) |
 | NESDR SMArt | R820T2 | Standard crystal | ~1–2 ppm |
 
-All NESDR Smart variants use the same pyrtlsdr/librtlsdr driver. The NESDR-specific script adds device enumeration, selection by serial number, and records the device serial in the CSV.
+All NESDR Smart variants use the same pyrtlsdr/librtlsdr driver as any other RTL2832U dongle, so `beacon_monitor.py` handles them directly — use `--list-devices` to enumerate units, `--device` to select one by index or serial, and `--ppm 0` on the TCXO variants.
 
 ## Beacon Cycle
 
@@ -50,18 +50,50 @@ Each CSV row is tagged with the current phase. Propagation analysis should filte
 
 ## Installation
 
+The scripts declare their own dependencies inline ([PEP 723](https://peps.python.org/pep-0723/)), so [uv](https://docs.astral.sh/uv/) installs Python and every package on first run. There is nothing to install by hand and no virtualenv to activate.
+
+### 1. Install uv
+
+| Platform | Command |
+|----------|---------|
+| Linux / Raspberry Pi / macOS | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Windows (PowerShell) | `powershell -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
+| Homebrew | `brew install uv` |
+| Debian / Ubuntu / Pi OS (apt) | `sudo apt install pipx && pipx install uv` |
+
+Open a new terminal afterwards so `uv` is on `PATH`.
+
+### 2. Install the librtlsdr driver
+
+`pyrtlsdr` is a binding to the native librtlsdr library, which uv cannot install for you:
+
+| Platform | Steps |
+|----------|-------|
+| Raspberry Pi OS / Debian / Ubuntu | `sudo apt install librtlsdr-dev rtl-sdr` |
+| Windows | Download the DLLs from [librtlsdr releases](https://github.com/librtlsdr/librtlsdr/releases) and put them on `PATH` (or next to the scripts), then run [Zadig](https://zadig.akeo.ie/) to install the WinUSB driver for the dongle |
+| macOS | `brew install librtlsdr` |
+
+On Linux, `rtl-sdr` also installs the udev rules that let a non-root user access the dongle. Log out and back in after installing so the new group membership applies.
+
+### 3. Run
+
 ```bash
-pip install pyrtlsdr numpy
+uv run beacon_monitor.py --list-devices
 ```
 
-Windows users also need the librtlsdr DLL from https://github.com/librtlsdr/librtlsdr/releases
+The first run downloads a suitable Python and the dependencies (a few seconds); later runs start immediately.
+
+> **Raspberry Pi note:** use **64-bit** Raspberry Pi OS. On 32-bit (armv7l) there are no numpy wheels on PyPI, so uv would build numpy from source. If you must run 32-bit, point uv at piwheels first:
+> `export UV_EXTRA_INDEX_URL=https://www.piwheels.org/simple`
 
 ## Usage
 
-### Generic RTL-SDR monitor
+Every example below works identically on Linux, Raspberry Pi, macOS, and Windows. On Windows use `^` or a single line instead of the `\` line continuations.
+
+### Monitor
 
 ```bash
-python beacon_monitor.py \
+uv run beacon_monitor.py \
     --freq 618.245 \
     --lo 9750.0 \
     --interval 10 \
@@ -69,34 +101,19 @@ python beacon_monitor.py \
     --output beacon_log.csv
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--freq` | 618.245 MHz | SDR center frequency (IF after LNB) |
-| `--lo` | 9750.0 MHz | LNB LO frequency |
-| `--interval` | 10 s | Sweep interval |
-| `--threshold` | −50.0 dBFS | Detection threshold |
-| `--gain` | auto | Gain in dB or `auto` |
-| `--ppm` | 1 | PPM correction (Windows LIBUSB workaround) |
-| `--duration` | 0 (forever) | Run time in seconds |
-
-### NooElec NESDR Smart monitor
+Device selection, for stations running more than one dongle:
 
 ```bash
 # List connected RTL-SDR devices
-python beacon_monitor_nesdr.py --list-devices
-
-# Run with default device (index 0)
-python beacon_monitor_nesdr.py \
-    --freq 618.245 \
-    --lo 9750.0 \
-    --output beacon_log.csv
+uv run beacon_monitor.py --list-devices
 
 # Target a specific unit by serial number
-python beacon_monitor_nesdr.py --device 00000001 --output beacon_log.csv
+uv run beacon_monitor.py --device 00000001 --output beacon_log.csv
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `--location` | — | Site ID recorded in each CSV row |
 | `--device` | `0` | Device index (int) or serial number string |
 | `--list-devices` | — | Print connected devices and exit |
 | `--freq` | 618.245 MHz | SDR center frequency (IF after LNB) |
@@ -104,19 +121,31 @@ python beacon_monitor_nesdr.py --device 00000001 --output beacon_log.csv
 | `--interval` | 10 s | Sweep interval |
 | `--threshold` | −50.0 dBFS | Detection threshold |
 | `--gain` | auto | Gain in dB (R820T2/R828D steps) or `auto` |
-| `--ppm` | **0** | PPM correction (0 suits TCXO variants; set to 1–2 for standard crystal) |
+| `--ppm` | 1 | PPM correction — use `0` for TCXO units (NESDR Smart XTR / v5), `1`–`2` for standard crystals and as the Windows LIBUSB workaround |
+| `--max-signals` | 1 | Peaks to report per sweep (1–5) |
+| `--span` | 2000 kHz | Analysis span centered on `--freq` |
 | `--duration` | 0 (forever) | Run time in seconds |
+
+### Calibration
+
+Point the dish at cold sky and sweep the gain table to find the best gain and detection threshold for your station:
+
+```bash
+uv run beacon_calibrate.py --freq 618.245 --lo 9750.0
+```
 
 R820T2 / R828D gain steps (dB): `0 0.9 1.4 2.7 3.7 7.7 8.7 12.5 14.4 15.7 16.6 19.7 20.7 22.9 25.4 28.0 29.7 32.8 33.8 36.4 37.2 38.6 40.2 42.1 43.4 43.9 44.5 48.0 49.6` — starting point for 10 GHz beacon work is typically 28–38 dB.
 
 ### Reporter (data upload)
 
 ```bash
-python beacon_reporter.py \
+uv run beacon_reporter.py \
     --api  https://api.ntms.org/beacon/observation \
     --key  YOUR_API_KEY \
     --site KM5PO-10G-BURLESON
 ```
+
+The reporter is pure standard library, so it needs no packages at all — `uv run` only supplies the Python interpreter.
 
 Credentials can also be supplied via environment variables:
 
@@ -124,7 +153,7 @@ Credentials can also be supplied via environment variables:
 export NTMS_API_URL=https://api.ntms.org/beacon/observation
 export NTMS_API_KEY=YOUR_API_KEY
 export NTMS_SITE_ID=KM5PO-10G-BURLESON
-python beacon_reporter.py
+uv run beacon_reporter.py
 ```
 
 Use `--dry-run` to verify operation without sending real data.
@@ -151,15 +180,25 @@ Because the beacon is GPS-locked, any sweep-to-sweep shift in `peak_freq_hz` ref
 ## Running Both Scripts Together
 
 ```bash
-# Terminal 1 — collect data (generic RTL-SDR)
-python beacon_monitor.py --output beacon_log.csv
+# Terminal 1 — collect data
+uv run beacon_monitor.py --output beacon_log.csv
 
-# Terminal 1 — collect data (NESDR Smart)
-python beacon_monitor_nesdr.py --output beacon_log.csv
-
-# Terminal 2 — upload data (works with either monitor)
-python beacon_reporter.py --site YOUR-CALLSIGN-10G-CITY
+# Terminal 2 — upload data
+uv run beacon_reporter.py --site YOUR-CALLSIGN-10G-CITY
 ```
+
+## Convenience Start Scripts
+
+`run_monitor.sh` / `run_calibrate.sh` (Linux, Raspberry Pi, macOS) and `run_monitor.ps1` / `run_calibrate.ps1` (Windows) hold your station's settings at the top of the file so you don't have to retype the flags. Edit the values, then:
+
+```bash
+bash run_monitor.sh          # Linux / Pi / macOS
+```
+```powershell
+.\run_monitor.ps1            # Windows
+```
+
+The shell versions use the systemd install at `/opt/ntms-beacon/venv` when it exists and fall back to `uv run` otherwise. If the dongle reports a USB permission error on Linux, install the udev rules (`sudo apt install rtl-sdr`) or re-run with `SUDO=sudo bash run_monitor.sh`.
 
 ---
 
@@ -194,7 +233,7 @@ The installer will:
 2. Blacklist the DVB kernel module so the NESDR Smart is available to librtlsdr
 3. Create a `ntms-beacon` system user with USB device access
 4. Create `/opt/ntms-beacon/` (scripts + venv) and `/var/lib/ntms-beacon/` (CSV + state)
-5. Install `pyrtlsdr` and `numpy` in an isolated virtualenv
+5. Install `pyrtlsdr` and `numpy` in an isolated virtualenv — built with `uv` if it is on `PATH`, otherwise `python3 -m venv` + `pip`
 6. Prompt for site-specific values and write `/opt/ntms-beacon/station.conf`
 7. Install and enable `beacon-monitor` and `beacon-reporter` as systemd services
 8. Start both services and print a status summary
@@ -206,9 +245,11 @@ The installer will:
 Both services start on boot and restart automatically if they crash:
 
 ```
-beacon-monitor.service  →  beacon_monitor_nesdr.py  (sweeps every 10 s, writes CSV)
-beacon-reporter.service →  beacon_reporter.py        (tails CSV, POSTs to NTMS API)
+beacon-monitor.service  →  beacon_monitor.py   (sweeps every 10 s, writes CSV)
+beacon-reporter.service →  beacon_reporter.py  (tails CSV, POSTs to NTMS API)
 ```
+
+The services run against the virtualenv at `/opt/ntms-beacon/venv` rather than `uv run`, so they start without network access and survive a `uv` upgrade or removal.
 
 ### Useful commands on the Pi
 
@@ -223,7 +264,7 @@ sudo systemctl status beacon-monitor beacon-reporter
 sudo systemctl restart beacon-monitor beacon-reporter
 
 # List connected SDR devices
-/opt/ntms-beacon/venv/bin/python3 /opt/ntms-beacon/beacon_monitor_nesdr.py --list-devices
+/opt/ntms-beacon/venv/bin/python3 /opt/ntms-beacon/beacon_monitor.py --list-devices
 ```
 
 ### Reconfiguring a station
