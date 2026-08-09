@@ -22,19 +22,21 @@ THRESHOLD=-35.0     # Detection threshold in dBFS
 INTERVAL=10         # Sweep interval in seconds
 MAX_SIGNALS=1       # Max signals to detect per sweep (1-5)
 SPAN=2000           # Analysis span in kHz (2000 = full 2 MHz capture)
+PASSBAND=5          # ± bandwidth in kHz for signal vs noise separation
 
 # --- Output ---
 OUTPUT=/var/lib/ntms-beacon/beacon_log.csv
 
 # --- Run ---
 sudo $PYTHON $SCRIPT \
-    --location   "$LOCATION" \
-    --freq       $FREQ \
-    --lo         $LO \
-    --ppm        $PPM \
-    --gain       $GAIN \
-    --threshold  $THRESHOLD \
-    --interval   $INTERVAL \
-    --max-signals $MAX_SIGNALS \
-    --span       $SPAN \
-    --output     "$OUTPUT"
+    --location     "$LOCATION" \
+    --freq         $FREQ \
+    --lo           $LO \
+    --ppm          $PPM \
+    --gain         $GAIN \
+    --threshold    $THRESHOLD \
+    --interval     $INTERVAL \
+    --max-signals  $MAX_SIGNALS \
+    --span         $SPAN \
+    --passband-khz $PASSBAND \
+    --output       "$OUTPUT"

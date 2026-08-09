@@ -8,7 +8,16 @@ Type=simple
 User=ntms-beacon
 Group=ntms-beacon
 WorkingDirectory=/var/lib/ntms-beacon
-EnvironmentFile=/opt/ntms-beacon/station.conf
+Environment=BEACON_OUTPUT=/var/lib/ntms-beacon/beacon_log.csv
+Environment=BEACON_DEVICE=0
+Environment=BEACON_FREQ_MHZ=618.245
+Environment=BEACON_LO_MHZ=9750.0
+Environment=BEACON_THRESHOLD_DBFS=-50.0
+Environment=BEACON_PASSBAND_KHZ=5
+Environment=BEACON_GAIN=auto
+Environment=BEACON_PPM=0
+Environment=BEACON_INTERVAL_S=10
+Environment=BEACON_CW_END_S=10
 ExecStart=/opt/ntms-beacon/venv/bin/python3 /opt/ntms-beacon/beacon_monitor.py
 Restart=always
 RestartSec=15
