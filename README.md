@@ -215,7 +215,7 @@ The installer will:
 3. Create a `ntms-beacon` system user with USB device access
 4. Create `/opt/ntms-beacon/` (scripts + venv) and `/var/lib/ntms-beacon/` (CSV + state)
 5. Install `pyrtlsdr` and `numpy` in an isolated virtualenv
-6. Prompt for site-specific values and write `/opt/ntms-beacon/station.conf`
+6. Prompt for site-specific values and write systemd drop-in override files
 7. Install and enable `beacon-monitor` and `beacon-reporter` as systemd services
 8. Start both services and print a status summary
 
@@ -239,7 +239,7 @@ sudo journalctl -u beacon-monitor -u beacon-reporter -f
 # Check service status
 sudo systemctl status beacon-monitor beacon-reporter
 
-# Restart after changing station.conf
+# Restart services
 sudo systemctl restart beacon-monitor beacon-reporter
 
 # List connected SDR devices
@@ -248,22 +248,41 @@ sudo systemctl restart beacon-monitor beacon-reporter
 
 ### Reconfiguring a station
 
-Edit `/opt/ntms-beacon/station.conf` directly, then restart:
+Edit the systemd drop-in override files directly, then restart:
 
 ```bash
-sudo nano /opt/ntms-beacon/station.conf
+sudo systemctl edit beacon-monitor
+sudo systemctl edit beacon-reporter
+sudo systemctl daemon-reload
 sudo systemctl restart beacon-monitor beacon-reporter
 ```
 
-Key settings in `station.conf`:
+The drop-in files are stored at:
 
-| Key | Description |
-|-----|-------------|
+| Service | Drop-in path |
+|---------|-------------|
+| `beacon-monitor` | `/etc/systemd/system/beacon-monitor.service.d/override.conf` |
+| `beacon-reporter` | `/etc/systemd/system/beacon-reporter.service.d/override.conf` |
+
+Each file has `[Service]` and `Environment=` lines (one per variable).  The
+`pi/placeholders/` directory contains templates showing all available variables
+with placeholder values.
+
+Key environment variables:
+
+| Variable | Description |
+|----------|-------------|
 | `NTMS_MONITOR_TOKEN` | Monitor token from prop.w5isp.com |
 | `NTMS_BEACON_ID` | Beacon UUID string |
+| `NTMS_GRIDSQUARE` | Maidenhead gridsquare (e.g. FN31pr) |
+| `NTMS_ANTENNA_HEIGHT_FT` | Antenna height in feet (optional) |
 | `NTMS_API_URL` | API endpoint (default: `https://prop.w5isp.com/api/v1/beacon-monitor/measurements`) |
 | `NTMS_PHASE_FILTER` | Only upload rows matching this phase (e.g. `CARRIER`) |
+| `BEACON_FREQ_MHZ` | IF center frequency in MHz (default: 618.245) |
+| `BEACON_LO_MHZ` | LNB LO frequency in MHz (default: 9750.0) |
 | `BEACON_PASSBAND_KHZ` | ± bandwidth in kHz for signal vs noise separation (default: 5) |
+| `BEACON_GAIN` | SDR gain in dB or `auto` (default: `auto`) |
+| `BEACON_PPM` | PPM correction (default: 0 for TCXO, 1–2 for crystal) |
 
 Or re-run the installer — it detects the existing config and asks before overwriting it.
 
